@@ -247,8 +247,7 @@ fn parse_constant(s: &str) -> Result<[u8; 5]> {
 
 /// Lê a imagem do CCF (1024 bytes) do BCM via DID 0xDE00.
 fn read_ccf_image<T: Transport>(dev: &mut Device<T>) -> Result<Vec<u8>> {
-    dev.add_flow_control_filter(BCM_RESP, BCM_REQ)
-        .map_err(|e| anyhow::anyhow!("filtro BCM: {e:?}"))?;
+    ensure_bcm_filter(dev);
     let answers = dev
         .request_iso_tp(BCM_REQ, &[0x22, 0xDE, 0x00], Duration::from_millis(2500))
         .map_err(|e| anyhow::anyhow!("ler CCF: {e:?}"))?;
@@ -262,20 +261,27 @@ fn read_ccf_image<T: Transport>(dev: &mut Device<T>) -> Result<Vec<u8>> {
 fn write_ccf_image<T: Transport>(dev: &mut Device<T>, image: &[u8]) -> Result<bool> {
     let mut req = vec![0x2E, 0xDE, 0x00];
     req.extend_from_slice(image);
+    // Janela longa: gravar ~1 KB em flash pode levar vários segundos.
     let answers = dev
-        .request_iso_tp(BCM_REQ, &req, Duration::from_millis(3000))
+        .request_iso_tp(BCM_REQ, &req, Duration::from_millis(8000))
         .map_err(|e| anyhow::anyhow!("gravar CCF: {e:?}"))?;
+    println!("Respostas à gravação ({}):", answers.len());
+    for r in &answers {
+        println!("  de {:#05X}: {}", r.can_id, hexdump(&r.service));
+    }
     if answers
         .iter()
         .any(|r| r.service.first() == Some(&0x6E) && r.service.get(1) == Some(&0xDE))
     {
         Ok(true)
-    } else if let Some(neg) = answers.iter().find(|r| r.service.first() == Some(&0x7F)) {
-        let nrc = neg.service.get(2).copied().unwrap_or(0);
-        println!("Gravação recusada (NRC {nrc:#04X}).");
+    } else if let Some(neg) = answers
+        .iter()
+        .find(|r| r.service.first() == Some(&0x7F) && r.service.get(2) != Some(&0x78))
+    {
+        println!("Gravação recusada (NRC {:#04X}).", neg.service.get(2).copied().unwrap_or(0));
         Ok(false)
     } else {
-        println!("Sem resposta clara à gravação.");
+        println!("Sem resposta positiva à gravação.");
         Ok(false)
     }
 }
@@ -375,9 +381,14 @@ const BCM_RESP: u16 = 0x72E;
 /// Faz o SecurityAccess diagnóstico do BCM (nível 0x03): sessão estendida,
 /// pedir semente (0x27 0x03), calcular a chave e enviá-la (0x27 0x04).
 /// Retorna Ok(true) se o módulo aceitou a chave. NÃO grava nada.
+/// Garante o filtro de controle de fluxo do BCM, ignorando "já existe"
+/// (ERR_NOT_UNIQUE), para poder ser chamado em sequência por vários passos.
+fn ensure_bcm_filter<T: Transport>(dev: &mut Device<T>) {
+    let _ = dev.add_flow_control_filter(BCM_RESP, BCM_REQ);
+}
+
 fn unlock_bcm<T: Transport>(dev: &mut Device<T>, constant: [u8; 5]) -> Result<bool> {
-    dev.add_flow_control_filter(BCM_RESP, BCM_REQ)
-        .map_err(|e| anyhow::anyhow!("filtro BCM: {e:?}"))?;
+    ensure_bcm_filter(dev);
 
     // Sessão estendida.
     let s = dev

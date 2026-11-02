@@ -48,3 +48,20 @@ BL:1.1.8.0"). O layout completo será formalizado ao implementar a parte CAN.
 - cOutboundData / cInboundData (0x0008 / 0x0009), filtros de flow control ISO-TP
   (cTableAddEntry 0x000D, seletor 2).
 - Leitura de tensão da bateria (cIoctl / cSetPin).
+
+## Limite de transmissão ISO-TP: 128 bytes (achado no carro)
+
+Validado no BCM da Discovery 4: a transmissão ISO-TP do adaptador (um
+`cOutboundData` de protocolo 6) completa até **128 bytes de payload**; a partir
+de ~130 bytes a transmissão multi-quadro trava e o módulo não recebe nada (sem
+resposta). A RECEPÇÃO multi-quadro funciona (ler 1 KB do DID 0xDE00 funciona),
+pois o adaptador gera o controle de fluxo sozinho. É um buffer de TX de 128 bytes
+no firmware.
+
+Consequência: gravar o CCF (1024 bytes) por um único `0x2E DE00` é impossível
+com a pilha de firmware. Opções: (a) implementar o ISO-TP de TRANSMISSÃO em
+software sobre canal CAN cru (protocolo 5), fatiando em quadros e tratando o
+flow control do módulo (BS/STmin, múltiplos blocos) — o que o DLL oficial faz;
+(b) usar a sequência de download em blocos (0x34/0x36/0x37) com TransferData
+≤128 bytes. O SecurityAccess do BCM já está validado no carro (semente/chave
+aceitas).
