@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'car_link.dart';
+import 'car_state.dart';
 import 'pack.dart';
 import 'screens.dart';
 import 'theme.dart';
@@ -54,10 +55,12 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   late final Future<Pack> _pack = Pack.load();
+  CarState? _car;
   int _tab = 0;
 
-  // Deep-link opcional por URL: ?tab=0|1|2 e ?q=<busca de falha>.
+  // Deep-link opcional por URL: ?tab=0|1|2, ?q=<busca> e ?demo=1 (pré-visualização).
   String? _initialQuery;
+  bool _demo = false;
 
   @override
   void initState() {
@@ -66,6 +69,7 @@ class _HomeShellState extends State<HomeShell> {
     final t = int.tryParse(q['tab'] ?? '');
     if (t != null && t >= 0 && t <= 2) _tab = t;
     _initialQuery = q['q'];
+    _demo = q['demo'] == '1';
   }
 
   static const _dests = [
@@ -97,10 +101,16 @@ class _HomeShellState extends State<HomeShell> {
           );
         }
         final pack = snap.data!;
+        final car = _car ??= CarState(pack);
+        if (_demo && !car.demo && !car.connected) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) car.loadDemo();
+          });
+        }
         final pages = [
-          PainelScreen(pack: pack),
-          LiveScreen(pack: pack),
-          FalhasScreen(pack: pack, initialQuery: _initialQuery),
+          PainelScreen(pack: pack, car: car),
+          LiveScreen(pack: pack, car: car),
+          FalhasScreen(pack: pack, car: car, initialQuery: _initialQuery),
         ];
         final wide = MediaQuery.sizeOf(context).width >= 820;
 
@@ -144,14 +154,40 @@ class _HomeShellState extends State<HomeShell> {
             actions: [
               Padding(
                 padding: const EdgeInsets.only(right: 12),
-                child: OutlinedButton.icon(
-                  onPressed: () => _notConnected(context),
-                  icon: const Icon(Icons.usb, size: 16),
-                  label: const Text('Conectar'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: C.ink2,
-                    side: const BorderSide(color: C.line),
-                  ),
+                child: ListenableBuilder(
+                  listenable: car,
+                  builder: (context, _) {
+                    if (car.connecting || car.reading) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 14),
+                        child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: C.accent)),
+                      );
+                    }
+                    if (car.connected) {
+                      return OutlinedButton.icon(
+                        onPressed: () => car.disconnect(),
+                        icon: const Icon(Icons.link_off, size: 16),
+                        label: const Text('Desconectar'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: C.good,
+                          side: const BorderSide(color: C.line),
+                        ),
+                      );
+                    }
+                    return OutlinedButton.icon(
+                      onPressed: () => _openConnect(context, car),
+                      icon: const Icon(Icons.usb, size: 16),
+                      label: const Text('Conectar'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: C.ink2,
+                        side: const BorderSide(color: C.line),
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
@@ -182,30 +218,78 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  void _notConnected(BuildContext context) {
-    final native = CarLink.available;
+  @override
+  void dispose() {
+    _car?.dispose();
+    super.dispose();
+  }
+
+  void _openConnect(BuildContext context, CarState car) {
+    if (!CarLink.available) {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: C.panel,
+          title: const Text('Conexão com o carro'),
+          content: const Text(
+            'Esta é a versão web (sem acesso a hardware). A leitura do carro '
+            '(VIN, falhas ativas, valores de sensor) exige o app nativo '
+            '(Windows/macOS/Android), que fala com o Mongoose pela ponte FFI.\n\n'
+            'Aqui você vê os dados do pacote: módulos, catálogo de live data e a '
+            'referência de falhas com o help do SDD por módulo.',
+            style: TextStyle(color: C.ink2),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Entendi')),
+          ],
+        ),
+      );
+      return;
+    }
+    final portCtrl = TextEditingController(text: 'COM5');
+    final baudCtrl = TextEditingController(text: '500000');
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: C.panel,
-        title: const Text('Conexão com o carro'),
-        content: Text(
-          native
-              ? 'Ponte nativa disponível neste alvo. Informe a porta do Mongoose '
-                  '(ex.: COM5) para conectar e ler VIN, módulos, falhas ativas e '
-                  'os valores ao vivo — fluxo em construção.'
-              : 'Esta é a versão web (sem acesso a hardware). A leitura do carro '
-                  '(VIN, falhas ativas, valores de sensor, CCF atual) exige o app '
-                  'nativo (Windows/macOS/Android), que fala com o Mongoose pela '
-                  'ponte FFI.\n\nAqui você vê os dados do pacote do veículo: '
-                  'módulos, catálogo de live data e a referência de falhas com o '
-                  'help do SDD por módulo.',
-          style: const TextStyle(color: C.ink2),
+        title: const Text('Conectar ao Mongoose'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: portCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'Porta (ex.: COM5, /dev/ttyACM0)'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: baudCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Baud (HS-CAN)'),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Lê VIN, varre os módulos e lê as falhas ativas. Ignição ligada, '
+              'motor desligado. Nada é gravado.',
+              style: TextStyle(fontSize: 11.5, color: C.ink3),
+            ),
+          ],
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Entendi')),
+              child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () {
+              final port = portCtrl.text.trim();
+              final baud = int.tryParse(baudCtrl.text.trim()) ?? 500000;
+              Navigator.pop(context);
+              car.connect(port, baud);
+            },
+            child: const Text('Conectar'),
+          ),
         ],
       ),
     );

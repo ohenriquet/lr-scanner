@@ -2,16 +2,20 @@
 class CarLink {
   static bool get available => false;
 
-  Map<String, dynamic> connect(String port, {int baud = 500000}) =>
+  CarLink([String? path]);
+
+  Future<Map<String, dynamic>> connect(String port, {int baud = 500000}) async =>
       {'ok': false, 'error': 'A ligação com o carro exige o app nativo (FFI).'};
 
-  void disconnect() {}
+  Future<void> disconnect() async {}
 
-  String? vin() => null;
+  Future<String?> vin() async => null;
 
-  List<List<dynamic>> scan(List<List<dynamic>> modules) => const [];
+  Future<List<List<dynamic>>> scan(List<List<dynamic>> modules) async => const [];
 
-  Map<String, List<(String, int)>> dtcs(List<List<dynamic>> present) => const {};
+  Future<Map<String, List<(String, int)>>> dtcs(
+          List<List<dynamic>> present) async =>
+      const {};
 
-  String? readDid(int req, int resp, int did) => null;
+  Future<Map<String, String?>> readMany(List<List<int>> reqs) async => const {};
 }

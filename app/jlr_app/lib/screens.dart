@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'car_state.dart';
 import 'pack.dart';
 import 'theme.dart';
 
@@ -39,10 +40,16 @@ Widget _chip(String t) => Container(
 
 class PainelScreen extends StatelessWidget {
   final Pack pack;
-  const PainelScreen({super.key, required this.pack});
+  final CarState car;
+  const PainelScreen({super.key, required this.pack, required this.car});
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+        listenable: car, builder: (context, _) => _build(context));
+  }
+
+  Widget _build(BuildContext context) {
     final v = pack.vehicle;
     return _Content(
       child: ListView(
@@ -80,15 +87,31 @@ class PainelScreen extends StatelessWidget {
                   Wrap(spacing: 8, runSpacing: 8, children: [
                     _chip('HS-CAN 500k'),
                     _chip('MS-CAN 125k'),
-                    _chip('${pack.modules.length} módulos'),
+                    _chip(car.connected
+                        ? '${car.online.length}/${pack.modules.length} online'
+                        : '${pack.modules.length} módulos'),
                     _chip('Mongoose Pro JLR'),
                   ]),
                   const SizedBox(height: 12),
-                  Text(
-                    'VIN, tensão da bateria e odômetro são leituras do carro — '
-                    'conecte o adaptador para lê-las.',
-                    style: TextStyle(fontSize: 11.5, color: C.ink3),
-                  ),
+                  if (car.vin != null)
+                    Row(children: [
+                      Text('VIN  ',
+                          style: TextStyle(fontSize: 11, color: C.ink3)),
+                      Flexible(
+                        child: Text(car.vin!,
+                            style: C.mono.copyWith(
+                                fontSize: 13, fontWeight: FontWeight.w600)),
+                      ),
+                    ])
+                  else if (car.connectError != null)
+                    Text('Falha ao conectar: ${car.connectError}',
+                        style: const TextStyle(fontSize: 11.5, color: C.crit))
+                  else
+                    Text(
+                      'VIN, falhas ativas e valores de sensor são leituras do '
+                      'carro — toque em Conectar.',
+                      style: TextStyle(fontSize: 11.5, color: C.ink3),
+                    ),
                 ],
               ),
             ),
@@ -104,7 +127,10 @@ class PainelScreen extends StatelessWidget {
               childAspectRatio: 2.6,
               mainAxisSpacing: 10,
               crossAxisSpacing: 10,
-              children: [for (final m in pack.modules) _moduleCard(m)],
+              children: [
+                for (final m in pack.modules)
+                  _moduleCard(m, car.connected, car.online.contains(m.acronym))
+              ],
             );
           }),
           const SizedBox(height: 24),
@@ -123,7 +149,7 @@ class PainelScreen extends StatelessWidget {
         ],
       );
 
-  Widget _moduleCard(Module m) => Card(
+  Widget _moduleCard(Module m, bool connected, bool online) => Card(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Column(
@@ -131,6 +157,17 @@ class PainelScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Row(children: [
+                if (connected) ...[
+                  Container(
+                    width: 8,
+                    height: 8,
+                    margin: const EdgeInsets.only(right: 7),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: online ? C.good : C.ink3.withValues(alpha: 0.4),
+                    ),
+                  ),
+                ],
                 Text(m.acronym,
                     style: const TextStyle(
                         fontWeight: FontWeight.w700, fontSize: 15)),
@@ -153,7 +190,8 @@ class PainelScreen extends StatelessWidget {
 
 class LiveScreen extends StatefulWidget {
   final Pack pack;
-  const LiveScreen({super.key, required this.pack});
+  final CarState car;
+  const LiveScreen({super.key, required this.pack, required this.car});
   @override
   State<LiveScreen> createState() => _LiveScreenState();
 }
@@ -165,7 +203,10 @@ class _LiveScreenState extends State<LiveScreen> {
   String _query = '';
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+      listenable: widget.car, builder: (context, _) => _body(context));
+
+  Widget _body(BuildContext context) {
     final mods = widget.pack.liveModules;
     final all = widget.pack.live[_module] ?? const [];
     final q = _query.toLowerCase();
@@ -186,8 +227,11 @@ class _LiveScreenState extends State<LiveScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Catálogo de live data do pacote — ${_total()} parâmetros em '
-                  '${mods.length} módulos. Valores ao vivo exigem o carro.',
+                  widget.car.connected
+                      ? 'Toque num sinal para observar (leitura ao vivo a ~2 Hz). '
+                          '${_total()} sinais no catálogo.'
+                      : 'Catálogo de live data — ${_total()} sinais em '
+                          '${mods.length} módulos. Valores ao vivo exigem o carro.',
                   style: TextStyle(fontSize: 11.5, color: C.ink3),
                 ),
                 const SizedBox(height: 10),
@@ -259,8 +303,22 @@ class _LiveScreenState extends State<LiveScreen> {
   int _total() =>
       widget.pack.live.values.fold(0, (a, b) => a + b.length);
 
-  Widget _paramRow(LiveParam p) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 11),
+  Widget _paramRow(LiveParam p) {
+    final car = widget.car;
+    final key = '$_module|${p.did}';
+    final watched = car.isWatched(_module, p);
+    final sample = car.live[key];
+    final display = sample?.display ?? (watched ? '…' : '—');
+    return InkWell(
+      onTap: car.connected ? () => car.toggleWatch(_module, p) : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+                color: watched ? C.accent : Colors.transparent, width: 2),
+          ),
+        ),
         child: Row(
           children: [
             Expanded(
@@ -274,20 +332,26 @@ class _LiveScreenState extends State<LiveScreen> {
                 ],
               ),
             ),
-            Text('—',
+            Text(display,
                 style: TextStyle(
-                    color: C.ink3, fontSize: 15, fontWeight: FontWeight.w600)),
+                    color: watched ? C.accent : C.ink3,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600)),
           ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 // ───────────────────────────── Falhas ─────────────────────────────
 
 class FalhasScreen extends StatefulWidget {
   final Pack pack;
+  final CarState car;
   final String? initialQuery;
-  const FalhasScreen({super.key, required this.pack, this.initialQuery});
+  const FalhasScreen(
+      {super.key, required this.pack, required this.car, this.initialQuery});
   @override
   State<FalhasScreen> createState() => _FalhasScreenState();
 }
@@ -303,7 +367,11 @@ class _FalhasScreenState extends State<FalhasScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+      listenable: widget.car, builder: (context, _) => _body(context));
+
+  Widget _body(BuildContext context) {
+    final car = widget.car;
     final q = _query.trim().toUpperCase();
     final codes = q.isEmpty
         ? const <String>[]
@@ -321,8 +389,11 @@ class _FalhasScreenState extends State<FalhasScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Referência de falhas: busque um código para ver a descrição e '
-                  'o help do SDD por módulo. As falhas ativas vêm do carro.',
+                  car.connected
+                      ? 'Falhas ativas lidas do carro. Busque um código para a '
+                          'referência completa.'
+                      : 'Referência de falhas: busque um código para a descrição '
+                          'e o help do SDD por módulo. As ativas vêm do carro.',
                   style: TextStyle(fontSize: 11.5, color: C.ink3),
                 ),
                 const SizedBox(height: 10),
@@ -351,20 +422,102 @@ class _FalhasScreenState extends State<FalhasScreen> {
               ],
             ),
           ),
-          Expanded(
-            child: q.isEmpty
-                ? Center(
-                    child: Text('Digite um código para buscar',
-                        style: TextStyle(color: C.ink3)))
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    children: [
-                      for (final c in codes)
-                        _dtcTile(c, expanded: codes.length == 1)
-                    ],
-                  ),
-          ),
+          Expanded(child: _content(car, q, codes)),
         ],
+      ),
+    );
+  }
+
+  Widget _content(CarState car, String q, List<String> codes) {
+    if (q.isNotEmpty) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [
+          for (final c in codes) _dtcTile(c, expanded: codes.length == 1)
+        ],
+      );
+    }
+    if (car.connected) {
+      final entries = <(String, String, int)>[]; // módulo, código, status
+      car.activeDtcs.forEach((mod, list) {
+        for (final (code, status) in list) {
+          entries.add((mod, code, status));
+        }
+      });
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(children: [
+              Text('Falhas ativas: ${entries.length}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 13)),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: car.reading ? null : () => car.refresh(),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Reler'),
+              ),
+            ]),
+          ),
+          if (entries.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: Center(
+                  child: Text('Nenhuma falha ativa.',
+                      style: TextStyle(color: C.ink3))),
+            ),
+          for (final e in entries) _activeTile(e.$1, e.$2, e.$3),
+        ],
+      );
+    }
+    return Center(
+        child: Text('Digite um código para buscar',
+            style: TextStyle(color: C.ink3)));
+  }
+
+  /// Tile de uma falha ativa (módulo + código + status), com o help do módulo.
+  Widget _activeTile(String module, String code, int status) {
+    final base = code.split('-').first;
+    final desc = widget.pack.dtcText[base] ?? '';
+    final help = widget.pack.dtcHelp[base]?[module];
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+          title: Row(children: [
+            Text(code,
+                style: C.mono.copyWith(
+                    fontWeight: FontWeight.w700, fontSize: 14, color: C.crit)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: Text(desc,
+                    style: TextStyle(fontSize: 12.5, color: C.ink2))),
+          ]),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Wrap(spacing: 6, children: [
+              _chip(module),
+              _chip('status 0x${status.toRadixString(16).padLeft(2, '0')}'),
+            ]),
+          ),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+          children: help == null
+              ? [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Sem help para $base no módulo $module.',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: C.ink3,
+                            fontStyle: FontStyle.italic)),
+                  )
+                ]
+              : [_moduleHelp(module, help)],
+        ),
       ),
     );
   }
