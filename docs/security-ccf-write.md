@@ -182,3 +182,31 @@ Como o erase auto-aborta se negado, testar `--write` é seguro.
 
 Ferramenta nova: `sdd-import decrypt --file X.exml --out Y.xml` decifra qualquer
 `.exml` (3DES) com a chave do crate `sdd-crypto`.
+
+## CONCLUSÃO: gravação do CCF exige SBL (não está no SDD local)
+
+Pesquisa + teste no carro + RE convergem: a gravação do CCF no BCM L319 baixa um
+**Secondary Boot Loader (SBL)** para a RAM do módulo (via 34/36/37) e o inicia;
+só então o erase 0xFF00 e o download do CCF são aceitos. Sem o SBL, o bootloader
+primário recusa o erase com `7F 31 22` (conditionsNotCorrect) — exatamente o que
+observamos, mesmo com sessão de programação (burst 18/18 `0x50`), segurança OK e
+formato de erase correto.
+
+Evidências:
+- `CSessionCcf` (decompilado): caminho do CCF tem `DownloadGBL`, `CreateSBLSession`,
+  `GetSBLNode`, "Download GBL to get control of subnetwork".
+- Comunidade: r/CarHacking "Updating CCF on car - SBL needed"; SBLs ficam em
+  servidor online da JLR, não no SDD.
+- Instalação local: só há VBF `_CCF` (CARCFG) do BCM; nenhum SBL/GBL do L319
+  (os únicos SBL/GBL presentes são L322 IGWM, X150/X250 ICM, e uns genéricos em
+  IDS/Flash).
+
+Caminhos reais para destravar a gravação:
+1. Obter o SBL do BCM L319 (TOPIx online da JLR, ou da comunidade). Com o VBF do
+   SBL, o fluxo fica: download SBL -> start -> erase -> write CCF, tudo offline.
+2. Captura via shim J2534 com o SDD rodando ONLINE (ele busca o SBL e grava; nós
+   copiamos a sequência exata).
+3. Ferramentas comerciais (Abrites AVDI, Diatronik Pluto) já trazem os SBLs.
+
+Toda a LEITURA/decode do CCF e o diagnóstico (VIN, módulos, DTCs, live) já
+funcionam; só a GRAVAÇÃO depende do SBL.
