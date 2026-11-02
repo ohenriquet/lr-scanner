@@ -6,6 +6,8 @@
 //! o barramento, que também é sequencial.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use anyhow::Result;
 use diag::{CarSession, ModuleAddr, SerialTransport};
@@ -16,33 +18,52 @@ type Session = CarSession<SerialTransport>;
 
 pub fn run(port: &str, baud: u32, web_dir: &str, http_port: u16) -> Result<()> {
     println!("Abrindo {port} @ {baud} baud...");
-    let (mut session, status) = Session::open_serial(port, baud)
+    let (session, status) = Session::open_serial(port, baud)
         .map_err(|e| anyhow::anyhow!("conectar ao Mongoose: {e}"))?;
     println!("Conectado (status {status:#010x}). Canal ISO-TP aberto.");
 
-    let web = PathBuf::from(web_dir);
+    let web = Arc::new(PathBuf::from(web_dir));
     anyhow::ensure!(
         web.join("index.html").is_file(),
         "web não encontrado em {web_dir} (rode: flutter build web)"
     );
 
     let addr = format!("127.0.0.1:{http_port}");
-    let server = Server::http(&addr).map_err(|e| anyhow::anyhow!("abrir HTTP: {e}"))?;
+    let server = Arc::new(Server::http(&addr).map_err(|e| anyhow::anyhow!("abrir HTTP: {e}"))?);
+    // A sessão de carro é serializada por um Mutex (o barramento é sequencial),
+    // mas os arquivos estáticos e a UI são servidos por várias threads — assim a
+    // página não congela enquanto uma leitura longa (scan/DTCs) está em curso.
+    let session = Arc::new(Mutex::new(session));
     println!("App em http://{addr}/  (abra no navegador; Conectar já lê o carro)");
 
-    for mut req in server.incoming_requests() {
-        let url = req.url().to_string();
-        let path = url.split('?').next().unwrap_or("/").to_string();
-        if path.starts_with("/api/") {
-            let mut body = String::new();
-            let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
-            let method = req.method().clone();
-            let v = handle_api(&mut session, &path, &method, &body);
-            let resp = Response::from_string(v.to_string()).with_header(json_header());
-            req.respond(resp).ok();
-        } else {
-            serve_static(&web, &path, req);
-        }
+    let mut handles = Vec::new();
+    for _ in 0..4 {
+        let server = Arc::clone(&server);
+        let session = Arc::clone(&session);
+        let web = Arc::clone(&web);
+        handles.push(thread::spawn(move || {
+            while let Ok(mut req) = server.recv() {
+                let url = req.url().to_string();
+                let path = url.split('?').next().unwrap_or("/").to_string();
+                if path.starts_with("/api/") {
+                    let mut body = String::new();
+                    let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
+                    let method = req.method().clone();
+                    let v = {
+                        // recupera de um eventual mutex envenenado (não aborta o servidor)
+                        let mut s = session.lock().unwrap_or_else(|p| p.into_inner());
+                        handle_api(&mut s, &path, &method, &body)
+                    };
+                    let resp = Response::from_string(v.to_string()).with_header(json_header());
+                    req.respond(resp).ok();
+                } else {
+                    serve_static(&web, &path, req);
+                }
+            }
+        }));
+    }
+    for h in handles {
+        let _ = h.join();
     }
     Ok(())
 }
@@ -103,7 +124,14 @@ fn handle_api(session: &mut Session, path: &str, method: &Method, body: &str) ->
 }
 
 fn parse_modules(body: &str) -> Vec<ModuleAddr> {
-    serde_json::from_str::<Vec<(String, u16, u16)>>(body).unwrap_or_default()
+    // O pack traz módulos repetidos (variantes de motor/ano com o mesmo
+    // endereço CAN — p.ex. PCM/TCM ×3). Sondar o mesmo endereço várias vezes só
+    // multiplica o tempo de scan, então deduplica por (req,resp).
+    let v = serde_json::from_str::<Vec<(String, u16, u16)>>(body).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    v.into_iter()
+        .filter(|(_, req, resp)| seen.insert((*req, *resp)))
+        .collect()
 }
 
 fn serve_static(web: &Path, path: &str, req: tiny_http::Request) {

@@ -118,11 +118,14 @@ class CarState extends ChangeNotifier {
     notifyListeners();
     try {
       vin = await link.vin();
+      notifyListeners(); // mostra o VIN assim que chega
       final present = await link.scan(_moduleList());
       online
         ..clear()
         ..addAll(present.map((e) => e[0].toString()));
+      notifyListeners(); // mostra os módulos presentes já
       activeDtcs = await link.dtcs(present);
+      notifyListeners(); // mostra as falhas antes de ler o CCF
       await readCcf();
     } catch (e) {
       connectError = '$e';
