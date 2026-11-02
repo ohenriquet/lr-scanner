@@ -444,16 +444,30 @@ class _FalhasScreenState extends State<FalhasScreen> {
           entries.add((mod, code, status));
         }
       });
+      // A leitura usa a máscara 0xFF (tudo que está na memória). Separa as
+      // CONFIRMADAS (bit confirmedDTC 0x08) do histórico armazenado, e ordena
+      // confirmadas primeiro — é o que de fato interessa como "falha atual".
+      entries.sort((a, b) {
+        final ca = (a.$3 & 0x08) != 0, cb = (b.$3 & 0x08) != 0;
+        if (ca != cb) return ca ? -1 : 1;
+        return a.$2.compareTo(b.$2);
+      });
+      final nConf = entries.where((e) => (e.$3 & 0x08) != 0).length;
       return ListView(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(children: [
-              Text('Falhas ativas: ${entries.length}',
+              Expanded(
+                child: Text(
+                  entries.isEmpty
+                      ? 'Nenhuma falha na memória'
+                      : '$nConf confirmada${nConf == 1 ? '' : 's'} · ${entries.length} na memória',
                   style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 13)),
-              const Spacer(),
+                      fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+              ),
               TextButton.icon(
                 onPressed: car.reading ? null : () => car.refresh(),
                 icon: const Icon(Icons.refresh, size: 16),
@@ -465,7 +479,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 20),
               child: Center(
-                  child: Text('Nenhuma falha ativa.',
+                  child: Text('Nenhuma falha na memória.',
                       style: TextStyle(color: C.ink3))),
             ),
           for (final e in entries) _activeTile(e.$1, e.$2, e.$3),
@@ -482,6 +496,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
     final base = code.split('-').first;
     final desc = widget.pack.dtcText[base] ?? '';
     final help = widget.pack.dtcHelp[base]?[module];
+    final confirmed = (status & 0x08) != 0; // confirmedDTC
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Theme(
@@ -491,16 +506,21 @@ class _FalhasScreenState extends State<FalhasScreen> {
           title: Row(children: [
             Text(code,
                 style: C.mono.copyWith(
-                    fontWeight: FontWeight.w700, fontSize: 14, color: C.crit)),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: confirmed ? C.crit : C.ink2)),
             const SizedBox(width: 12),
             Expanded(
                 child: Text(desc,
-                    style: TextStyle(fontSize: 12.5, color: C.ink2))),
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        color: confirmed ? C.ink2 : C.ink3))),
           ]),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Wrap(spacing: 6, children: [
               _chip(module),
+              _chip(confirmed ? 'confirmada' : 'histórico'),
               _chip('status 0x${status.toRadixString(16).padLeft(2, '0')}'),
             ]),
           ),
