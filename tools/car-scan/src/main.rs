@@ -143,6 +143,13 @@ enum Command {
         #[arg(long)]
         constant: String,
     },
+    /// Sonda o tamanho de recepção do BCM: envia 0x2E DE00 + N bytes via
+    /// ISO-TP de software SEM desbloquear (o módulo rejeita, então é seguro).
+    /// Mostra se foi aceito (0x7F 2E ..) ou overflow.
+    ProbeWrite {
+        #[arg(long)]
+        size: usize,
+    },
     /// Teste seguro da tubulação: lê o CCF, desbloqueia e REGRAVA os MESMOS
     /// bytes (não muda nada), depois confere a releitura. ESCREVE (idêntico):
     /// exige --yes. Precisa da constante do BCM.
@@ -220,6 +227,16 @@ fn main() -> Result<()> {
         Command::CcfUnlock { constant } => {
             unlock_bcm(&mut dev, parse_constant(&constant)?)?;
         }
+        Command::ProbeWrite { size } => {
+            sw_setup(&mut dev)?;
+            let mut service = vec![0x2E, 0xDE, 0x00];
+            service.extend(std::iter::repeat_n(0u8, size));
+            println!("Enviando 0x2E DE00 + {size} bytes (sem desbloquear)...");
+            match sw_uds(&mut dev, &service, 4000) {
+                Ok(r) => println!("Resposta: {}", hexdump(&r)),
+                Err(e) => println!("Falha: {e}"),
+            }
+        }
         Command::CcfWriteback { constant, yes } => {
             ccf_writeback(&mut dev, parse_constant(&constant)?, yes)?;
         }
@@ -245,8 +262,101 @@ fn parse_constant(s: &str) -> Result<[u8; 5]> {
     Ok(c5)
 }
 
+/// Prepara a via de ESCRITA: fecha o canal ISO-TP de firmware e abre um canal
+/// CAN cru com filtro PASS, para usar o ISO-TP de software (sem o limite de
+/// 128 bytes do firmware).
+fn sw_setup<T: Transport<Error: 'static>>(dev: &mut Device<T>) -> Result<()> {
+    dev.close_channel()
+        .map_err(|e| anyhow::anyhow!("fechar canal: {e:?}"))?;
+    dev.connect_can(500_000)
+        .map_err(|e| anyhow::anyhow!("abrir canal CAN: {e:?}"))?;
+    dev.add_can_pass_filter(BCM_RESP)
+        .map_err(|e| anyhow::anyhow!("filtro PASS BCM: {e:?}"))?;
+    Ok(())
+}
+
+/// Faz uma requisição UDS ao BCM via ISO-TP de software, tratando resposta
+/// pendente (0x7F <sid> 0x78) até a resposta final.
+fn sw_uds<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    service: &[u8],
+    timeout_ms: u64,
+) -> Result<Vec<u8>> {
+    use mongoose::isotp_sw;
+    isotp_sw::send(dev, BCM_REQ, BCM_RESP, service)
+        .map_err(|e| anyhow::anyhow!("envio sw: {e}"))?;
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let resp = isotp_sw::recv(dev, BCM_REQ, BCM_RESP, Duration::from_millis(2500))
+            .map_err(|e| anyhow::anyhow!("recepção sw: {e}"))?;
+        let pending = resp.first() == Some(&0x7F) && resp.get(2) == Some(&0x78);
+        if !pending {
+            return Ok(resp);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(resp);
+        }
+    }
+}
+
+/// Desbloqueio do BCM pela via de software.
+fn unlock_bcm_sw<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    constant: [u8; 5],
+) -> Result<bool> {
+    let s = sw_uds(dev, &[0x10, 0x03], 800)?;
+    anyhow::ensure!(s.first() == Some(&0x50), "sem sessão estendida (sw)");
+    let seed = sw_uds(dev, &[0x27, 0x03], 800)?;
+    anyhow::ensure!(
+        seed.first() == Some(&0x67) && seed.len() >= 5,
+        "sem semente (sw): {}",
+        hexdump(&seed)
+    );
+    let s3 = [seed[2], seed[3], seed[4]];
+    println!("Semente (sw): {}", hexdump(&s3));
+    if s3 == [0, 0, 0] {
+        return Ok(true);
+    }
+    let key = jlr_security::iso14229_key(s3, constant);
+    println!("Chave (sw): {}", hexdump(&key));
+    let mut send = vec![0x27, 0x04];
+    send.extend_from_slice(&key);
+    let r = sw_uds(dev, &send, 1000)?;
+    if r.first() == Some(&0x67) && r.get(1) == Some(&0x04) {
+        println!("BCM desbloqueado (sw).");
+        Ok(true)
+    } else {
+        println!("Chave recusada (sw): {}", hexdump(&r));
+        Ok(false)
+    }
+}
+
+/// Lê o CCF pela via de software (0x22 DE00).
+fn read_ccf_sw<T: Transport<Error: 'static>>(dev: &mut Device<T>) -> Result<Vec<u8>> {
+    let r = sw_uds(dev, &[0x22, 0xDE, 0x00], 4000)?;
+    anyhow::ensure!(
+        r.len() > 3 && r[0] == 0x62 && r[1] == 0xDE && r[2] == 0x00,
+        "resposta inesperada à leitura do CCF (sw): {}",
+        hexdump(&r[..r.len().min(8)])
+    );
+    Ok(r[3..].to_vec())
+}
+
+/// Grava o CCF pela via de software (0x2E DE00 + imagem).
+fn write_ccf_sw<T: Transport<Error: 'static>>(dev: &mut Device<T>, image: &[u8]) -> Result<bool> {
+    let mut service = vec![0x2E, 0xDE, 0x00];
+    service.extend_from_slice(image);
+    let r = sw_uds(dev, &service, 10_000)?;
+    if r.first() == Some(&0x6E) && r.get(1) == Some(&0xDE) {
+        Ok(true)
+    } else {
+        println!("Gravação (sw) sem positivo: {}", hexdump(&r));
+        Ok(false)
+    }
+}
+
 /// Lê a imagem do CCF (1024 bytes) do BCM via DID 0xDE00.
-fn read_ccf_image<T: Transport>(dev: &mut Device<T>) -> Result<Vec<u8>> {
+fn read_ccf_image<T: Transport<Error: 'static>>(dev: &mut Device<T>) -> Result<Vec<u8>> {
     ensure_bcm_filter(dev);
     let answers = dev
         .request_iso_tp(BCM_REQ, &[0x22, 0xDE, 0x00], Duration::from_millis(2500))
@@ -258,37 +368,13 @@ fn read_ccf_image<T: Transport>(dev: &mut Device<T>) -> Result<Vec<u8>> {
 /// Grava a imagem do CCF no BCM via WriteDataByIdentifier (0x2E DE00).
 /// Requer o módulo já desbloqueado e em sessão estendida. Retorna Ok(true)
 /// se o módulo respondeu positivamente (0x6E DE00).
-fn write_ccf_image<T: Transport>(dev: &mut Device<T>, image: &[u8]) -> Result<bool> {
-    let mut req = vec![0x2E, 0xDE, 0x00];
-    req.extend_from_slice(image);
-    // Janela longa: gravar ~1 KB em flash pode levar vários segundos.
-    let answers = dev
-        .request_iso_tp(BCM_REQ, &req, Duration::from_millis(8000))
-        .map_err(|e| anyhow::anyhow!("gravar CCF: {e:?}"))?;
-    println!("Respostas à gravação ({}):", answers.len());
-    for r in &answers {
-        println!("  de {:#05X}: {}", r.can_id, hexdump(&r.service));
-    }
-    if answers
-        .iter()
-        .any(|r| r.service.first() == Some(&0x6E) && r.service.get(1) == Some(&0xDE))
-    {
-        Ok(true)
-    } else if let Some(neg) = answers
-        .iter()
-        .find(|r| r.service.first() == Some(&0x7F) && r.service.get(2) != Some(&0x78))
-    {
-        println!("Gravação recusada (NRC {:#04X}).", neg.service.get(2).copied().unwrap_or(0));
-        Ok(false)
-    } else {
-        println!("Sem resposta positiva à gravação.");
-        Ok(false)
-    }
-}
-
 /// Teste seguro: lê o CCF, faz backup, desbloqueia, regrava os MESMOS bytes
 /// e confere a releitura. Não muda nenhuma configuração.
-fn ccf_writeback<T: Transport>(dev: &mut Device<T>, constant: [u8; 5], yes: bool) -> Result<()> {
+fn ccf_writeback<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    constant: [u8; 5],
+    yes: bool,
+) -> Result<()> {
     if !yes {
         anyhow::bail!("regravar o CCF escreve no módulo (mesmo idêntico). Repita com --yes.");
     }
@@ -299,19 +385,22 @@ fn ccf_writeback<T: Transport>(dev: &mut Device<T>, constant: [u8; 5], yes: bool
     std::fs::write(&backup, &original).ok();
     println!("Backup salvo em {backup}");
 
-    if !unlock_bcm(dev, constant)? {
+    // Via de ESCRITA: CAN cru + ISO-TP de software (sem o limite de 128 bytes).
+    sw_setup(dev)?;
+    if !unlock_bcm_sw(dev, constant)? {
         anyhow::bail!("não foi possível desbloquear o BCM; nada gravado.");
     }
 
-    println!("Regravando os MESMOS {} bytes...", original.len());
-    if !write_ccf_image(dev, &original)? {
+    println!(
+        "Regravando os MESMOS {} bytes (ISO-TP sw)...",
+        original.len()
+    );
+    if !write_ccf_sw(dev, &original)? {
         anyhow::bail!("gravação não confirmada.");
     }
     println!("Gravação confirmada. Conferindo releitura...");
 
-    // Volta à sessão padrão e relê.
-    let _ = dev.request_iso_tp(BCM_REQ, &[0x10, 0x01], Duration::from_millis(400));
-    let reread = read_ccf_image(dev)?;
+    let reread = read_ccf_sw(dev)?;
     if reread == original {
         println!("\n*** OK: releitura idêntica. Tubulação de escrita validada. ***");
     } else {
@@ -323,7 +412,7 @@ fn ccf_writeback<T: Transport>(dev: &mut Device<T>, constant: [u8; 5], yes: bool
 }
 
 /// Altera um byte do CCF, recalcula o checksum, grava e confere.
-fn ccf_set<T: Transport>(
+fn ccf_set<T: Transport<Error: 'static>>(
     dev: &mut Device<T>,
     constant: [u8; 5],
     offset: usize,
@@ -350,15 +439,15 @@ fn ccf_set<T: Transport>(
     // Recalcula o checksum (preenchido após reconstruir o algoritmo).
     ccf_checksum::fix_checksums(&mut modified).context("recalcular checksum do CCF")?;
 
-    if !unlock_bcm(dev, constant)? {
+    sw_setup(dev)?;
+    if !unlock_bcm_sw(dev, constant)? {
         anyhow::bail!("não foi possível desbloquear o BCM; nada gravado.");
     }
-    if !write_ccf_image(dev, &modified)? {
+    if !write_ccf_sw(dev, &modified)? {
         anyhow::bail!("gravação não confirmada.");
     }
     println!("Gravação confirmada. Conferindo...");
-    let _ = dev.request_iso_tp(BCM_REQ, &[0x10, 0x01], Duration::from_millis(400));
-    let reread = read_ccf_image(dev)?;
+    let reread = read_ccf_sw(dev)?;
     if reread.get(offset) == Some(&value) {
         println!("\n*** OK: byte {offset} agora é 0x{value:02X} no módulo. ***");
         println!("Backup do estado anterior: {backup}");
@@ -383,11 +472,14 @@ const BCM_RESP: u16 = 0x72E;
 /// Retorna Ok(true) se o módulo aceitou a chave. NÃO grava nada.
 /// Garante o filtro de controle de fluxo do BCM, ignorando "já existe"
 /// (ERR_NOT_UNIQUE), para poder ser chamado em sequência por vários passos.
-fn ensure_bcm_filter<T: Transport>(dev: &mut Device<T>) {
+fn ensure_bcm_filter<T: Transport<Error: 'static>>(dev: &mut Device<T>) {
     let _ = dev.add_flow_control_filter(BCM_RESP, BCM_REQ);
 }
 
-fn unlock_bcm<T: Transport>(dev: &mut Device<T>, constant: [u8; 5]) -> Result<bool> {
+fn unlock_bcm<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    constant: [u8; 5],
+) -> Result<bool> {
     ensure_bcm_filter(dev);
 
     // Sessão estendida.
@@ -464,7 +556,12 @@ fn unlock_bcm<T: Transport>(dev: &mut Device<T>, constant: [u8; 5]) -> Result<bo
     }
 }
 
-fn raw<T: Transport>(dev: &mut Device<T>, module: &str, hex: &str, extended: bool) -> Result<()> {
+fn raw<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    module: &str,
+    hex: &str,
+    extended: bool,
+) -> Result<()> {
     let (_, req, resp) = *MODULES
         .iter()
         .find(|(name, _, _)| name.eq_ignore_ascii_case(module))
@@ -505,7 +602,10 @@ fn raw<T: Transport>(dev: &mut Device<T>, module: &str, hex: &str, extended: boo
 
 fn parse_hex(s: &str) -> Result<Vec<u8>> {
     let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    anyhow::ensure!(clean.len() % 2 == 0, "hex com número ímpar de dígitos");
+    anyhow::ensure!(
+        clean.len().is_multiple_of(2),
+        "hex com número ímpar de dígitos"
+    );
     (0..clean.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).map_err(Into::into))
@@ -515,7 +615,7 @@ fn parse_hex(s: &str) -> Result<Vec<u8>> {
 /// Lê o CCF do BCM (DID 0xDE00, serviço 0x22) e salva um backup bruto.
 /// Tenta na sessão padrão; se recusado, entra em sessão estendida (0x10 03)
 /// e repete. Operação de leitura (a troca de sessão é reversível).
-fn read_ccf<T: Transport>(dev: &mut Device<T>, out: &str) -> Result<()> {
+fn read_ccf<T: Transport<Error: 'static>>(dev: &mut Device<T>, out: &str) -> Result<()> {
     const BCM_REQ: u16 = 0x726;
     const BCM_RESP: u16 = 0x72E;
     dev.add_flow_control_filter(BCM_RESP, BCM_REQ)
@@ -575,7 +675,7 @@ fn find_positive(answers: &[mongoose::client::IsoTpResponse], resp_id: u16) -> O
 }
 
 /// Leitura de dados ao vivo via OBD-II modo 01 (padrão, somente leitura).
-fn read_live<T: Transport>(dev: &mut Device<T>) -> Result<()> {
+fn read_live<T: Transport<Error: 'static>>(dev: &mut Device<T>) -> Result<()> {
     // Responde quem tiver OBD: PCM em 0x7E8, pede-se a 0x7E0.
     dev.add_flow_control_filter(0x7E8, 0x7E0)
         .map_err(|e| anyhow::anyhow!("filtro OBD: {e:?}"))?;
@@ -628,7 +728,11 @@ fn read_live<T: Transport>(dev: &mut Device<T>) -> Result<()> {
 }
 
 /// Limpa DTCs (serviço UDS 0x14, grupo 0xFFFFFF = todos). ESCREVE no veículo.
-fn clear_dtcs<T: Transport>(dev: &mut Device<T>, yes: bool, module: Option<&str>) -> Result<()> {
+fn clear_dtcs<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    yes: bool,
+    module: Option<&str>,
+) -> Result<()> {
     if !yes {
         anyhow::bail!("limpar DTCs escreve no veículo. Repita com --yes para confirmar.");
     }
@@ -671,7 +775,7 @@ fn clear_dtcs<T: Transport>(dev: &mut Device<T>, yes: bool, module: Option<&str>
     Ok(())
 }
 
-fn read_vin<T: Transport>(dev: &mut Device<T>) -> Result<()> {
+fn read_vin<T: Transport<Error: 'static>>(dev: &mut Device<T>) -> Result<()> {
     dev.add_flow_control_filter(0x7E8, 0x7E0)
         .map_err(|e| anyhow::anyhow!("filtro VIN: {e:?}"))?;
     let resp = dev
@@ -700,7 +804,9 @@ fn read_vin<T: Transport>(dev: &mut Device<T>) -> Result<()> {
     Ok(())
 }
 
-fn scan<T: Transport>(dev: &mut Device<T>) -> Result<Vec<(&'static str, u16, u16)>> {
+fn scan<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+) -> Result<Vec<(&'static str, u16, u16)>> {
     println!("Varredura de módulos (TesterPresent):");
     // Adiciona um filtro de controle de fluxo por módulo (uma vez).
     for &(_, req, resp) in MODULES {
@@ -723,7 +829,7 @@ fn scan<T: Transport>(dev: &mut Device<T>) -> Result<Vec<(&'static str, u16, u16
     Ok(present)
 }
 
-fn read_all_dtcs<T: Transport>(
+fn read_all_dtcs<T: Transport<Error: 'static>>(
     dev: &mut Device<T>,
     present: &[(&'static str, u16, u16)],
 ) -> Result<()> {

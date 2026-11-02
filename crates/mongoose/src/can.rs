@@ -15,6 +15,37 @@ pub const ISO15765_FRAME_PAD: u32 = 0x40;
 
 /// Seletor de tabela do filtro de controle de fluxo ISO-TP.
 pub const TABLE_FLOW_CONTROL: u8 = 2;
+/// Seletor de tabela do filtro PASS (CAN cru).
+pub const TABLE_PASS: u8 = 0;
+
+/// Payload de filtro PASS para CAN cru (`cTableAddEntry`, opcode 0x0d,
+/// seletor 0, tipo 1): recebe os quadros cujo ID (11 bits) casa com `id`.
+/// Layout: cabeçalho de 8 bytes `{tabela,0,0,0, flags16, tipo, tamanho}` +
+/// máscara (4 bytes BE) + padrão (4 bytes BE). Espelha `can_table_filter`.
+pub fn can_pass_filter_payload(id: u16) -> Vec<u8> {
+    let mut p = vec![TABLE_PASS, 0, 0, 0, 0, 0, 1, 4];
+    // flags = 0 (11 bits) em p[4..6] já zerados
+    p.extend_from_slice(&0x0000_07FFu32.to_be_bytes()); // máscara: 11 bits
+    p.extend_from_slice(&(id as u32).to_be_bytes()); // padrão: o ID
+    p
+}
+
+/// Payload de `cOutboundData` (opcode 8) para CAN cru: um quadro único.
+/// `id` é o CAN ID (11 bits); `data` são até 8 bytes. `chan=1`.
+pub fn can_transmit_payload(id: u16, data: &[u8], timeout_ms: u32) -> Vec<u8> {
+    let data_size = (4 + data.len()) as u16;
+    let mut p = vec![0u8; 12];
+    // flags = 0
+    p[4] = timeout_ms as u8;
+    p[5] = (timeout_ms >> 8) as u8;
+    p[6] = (timeout_ms >> 16) as u8;
+    p[7] = (timeout_ms >> 24) as u8;
+    p[8] = data_size as u8;
+    p[9] = (data_size >> 8) as u8;
+    p.extend_from_slice(&(id as u32).to_be_bytes());
+    p.extend_from_slice(data);
+    p
+}
 
 /// Payload de `cOpenChannel` (opcode 6): `flags` (u32 LE) seguido de `baud`
 /// (u32 LE). Enviado ao nó de canal `(protocolo<<8)|1` com `chan=0`.

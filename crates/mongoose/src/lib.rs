@@ -14,6 +14,7 @@ pub mod can;
 pub mod client;
 pub mod frame;
 pub mod isotp;
+pub mod isotp_sw;
 pub mod opcode;
 
 /// Transporte físico de bytes para o adaptador.

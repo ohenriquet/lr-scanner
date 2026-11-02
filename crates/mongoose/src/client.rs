@@ -53,6 +53,9 @@ pub struct IsoTpResponse {
     pub service: Vec<u8>,
 }
 
+/// Lista de quadros CAN recebidos: `(can_id, bytes)`.
+pub type CanFrames = Vec<(u32, Vec<u8>)>;
+
 /// Protocolo atualmente conectado no canal CAN/ISO-TP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelProtocol {
@@ -239,6 +242,95 @@ impl<T: Transport> Device<T> {
         self.reasm.reset();
         self.reassembled.clear();
         Ok(())
+    }
+
+    /// Abre o canal CAN cru (protocolo 5) e seleciona os pinos 6/14. Usado
+    /// pelo ISO-TP de software, que faz o fatiamento e o controle de fluxo.
+    pub fn connect_can(&mut self, baud: u32) -> Result<(), ClientError<T::Error>> {
+        let node = Self::channel_node(can::PROTO_CAN);
+        let open = self.transact(node, cmd::OPEN_CHANNEL, can::open_channel_payload(0, baud))?;
+        Self::expect_ok(&open)?;
+        let pin = self.transact(node, cmd::SET_PIN, can::set_pin_hs_can_payload())?;
+        Self::expect_ok(&pin)?;
+        self.protocol = Some(ChannelProtocol::Can);
+        Ok(())
+    }
+
+    /// Fecha o canal atual (cCloseChannel) para poder reabrir em outro protocolo.
+    pub fn close_channel(&mut self) -> Result<(), ClientError<T::Error>> {
+        let proto = match self.protocol {
+            Some(ChannelProtocol::Can) => can::PROTO_CAN,
+            Some(ChannelProtocol::IsoTp) => can::PROTO_ISO15765,
+            None => return Ok(()),
+        };
+        let node = Self::channel_node(proto);
+        let _ = self.transact(node, cmd::CLOSE_CHANNEL, vec![]);
+        self.protocol = None;
+        Ok(())
+    }
+
+    /// Adiciona um filtro PASS no canal CAN cru (recebe os quadros do `id`).
+    pub fn add_can_pass_filter(&mut self, id: u16) -> Result<u32, ClientError<T::Error>> {
+        let node = Self::channel_node(can::PROTO_CAN);
+        let resp = self.transact(node, cmd::TABLE_ADD_ENTRY, can::can_pass_filter_payload(id))?;
+        Self::expect_ok(&resp)?;
+        read_u32(&resp.data, 8).ok_or(ClientError::DeviceStatus(0xFFFF_FFFF))
+    }
+
+    /// Envia um quadro CAN cru (`id` + até 8 bytes).
+    pub fn can_send(&mut self, id: u16, data: &[u8]) -> Result<(), ClientError<T::Error>> {
+        let node = Self::channel_node(can::PROTO_CAN);
+        let payload = can::can_transmit_payload(id, data, 100);
+        let resp = self.transact_chan(node, cmd::OUTBOUND_DATA, CHAN_DATA, payload)?;
+        let st = Self::status_of(&resp);
+        if st == 0 || st == STATUS_QUEUED {
+            Ok(())
+        } else {
+            Err(ClientError::DeviceStatus(st))
+        }
+    }
+
+    /// Coleta quadros CAN crus recebidos por até `window`. Cada item é
+    /// `(can_id, bytes)` (sem o ID no vetor de bytes).
+    pub fn can_poll(&mut self, window: Duration) -> Result<CanFrames, ClientError<T::Error>> {
+        let deadline = Instant::now() + window;
+        let mut out = Vec::new();
+        let mut tmp = [0u8; 1024];
+        loop {
+            match frame::try_decode(&self.rx)? {
+                Decoded::Frame { body, consumed } => {
+                    self.rx.drain(..consumed);
+                    if let Ok(msg) = Message::decode_body(&body) {
+                        if msg.opcode == cmd::INBOUND_DATA {
+                            let b = msg.encode_body();
+                            if let Ok(f) = can::parse_inbound(&b) {
+                                if f.data.len() >= 4 {
+                                    let id = u32::from_be_bytes([
+                                        f.data[0], f.data[1], f.data[2], f.data[3],
+                                    ]);
+                                    out.push((id, f.data[4..].to_vec()));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Decoded::NeedMore => {}
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            let n = self
+                .transport
+                .read(&mut tmp)
+                .map_err(ClientError::Transport)?;
+            if n > 0 {
+                self.rx.extend_from_slice(&tmp[..n]);
+            } else if !out.is_empty() {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     /// Adiciona um filtro de controle de fluxo ISO-TP e devolve o handle do
