@@ -5,7 +5,9 @@
 //! Este utilitário NÃO escreve nada no veículo. Limpar DTCs é um comando à
 //! parte, explícito.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod ccf_checksum;
@@ -14,6 +16,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use mongoose::client::Device;
 use mongoose::Transport;
+
+/// Descrições de DTC carregadas de um pacote (número de 16 bits -> texto).
+type DtcText = HashMap<u16, String>;
 
 /// Tabela de módulos do L319 MY10 (sigla, id de requisição, id de resposta).
 /// Extraída do PLATFORM do SDD. HS-CAN direto; MS-CAN via gateway.
@@ -93,6 +98,10 @@ struct Cli {
     /// Taxa do HS-CAN (padrão 500000).
     #[arg(long, default_value_t = 500_000)]
     baud: u32,
+    /// Pacote SQLite do veículo (para nomear DTCs). Se omitido, procura em
+    /// `packs/`. Sem pacote, os DTCs aparecem só como código.
+    #[arg(long)]
+    pack: Option<String>,
     #[command(subcommand)]
     cmd: Command,
 }
@@ -223,15 +232,17 @@ fn main() -> Result<()> {
             scan(&mut dev)?;
         }
         Command::Dtcs => {
+            let texts = load_pack_texts(cli.pack.as_deref());
             let present = scan(&mut dev)?;
-            read_all_dtcs(&mut dev, &present)?;
+            read_all_dtcs(&mut dev, &present, &texts)?;
         }
         Command::All => {
+            let texts = load_pack_texts(cli.pack.as_deref());
             read_vin(&mut dev)?;
             println!();
             let present = scan(&mut dev)?;
             println!();
-            read_all_dtcs(&mut dev, &present)?;
+            read_all_dtcs(&mut dev, &present, &texts)?;
         }
         Command::Live => {
             read_live(&mut dev)?;
@@ -983,6 +994,7 @@ fn scan<T: Transport<Error: 'static>>(
 fn read_all_dtcs<T: Transport<Error: 'static>>(
     dev: &mut Device<T>,
     present: &[(&'static str, u16, u16)],
+    texts: &DtcText,
 ) -> Result<()> {
     println!("\nDTCs por módulo:");
     let mut total = 0;
@@ -1003,35 +1015,56 @@ fn read_all_dtcs<T: Transport<Error: 'static>>(
         } else {
             total += dtcs.len();
             println!("  {name:<6}: {} DTC(s)", dtcs.len());
-            for (code, status) in dtcs {
-                println!("      {code}  (status {status:#04X})");
+            for ([b0, b1, b2], status) in dtcs {
+                let code = dtc_code(b0, b1, b2);
+                let desc = texts
+                    .get(&dtc_number(b0, b1))
+                    .map(|s| format!("  {s}"))
+                    .unwrap_or_default();
+                println!("      {code:<10} (status {status:#04X}){desc}");
             }
         }
     }
     println!("\nTotal: {total} DTC(s).");
+    if texts.is_empty() {
+        println!("(sem pacote de textos: use --pack para ver as descrições)");
+    }
     Ok(())
 }
 
 /// Decodifica a resposta 0x59 0x02 <mask> [3 bytes DTC + 1 status]*.
-fn decode_dtcs(service: &[u8]) -> Vec<(String, u8)> {
+/// Devolve os 3 bytes crus do DTC + o byte de status.
+fn decode_dtcs(service: &[u8]) -> Vec<([u8; 3], u8)> {
     let mut out = Vec::new();
     if service.len() < 3 || service[0] != 0x59 || service[1] != 0x02 {
         return out;
     }
     let mut i = 3; // pula 59 02 <availabilityMask>
     while i + 4 <= service.len() {
-        let b0 = service[i];
-        let b1 = service[i + 1];
-        let b2 = service[i + 2];
-        let status = service[i + 3];
-        out.push((dtc_code(b0, b1, b2), status));
+        out.push((
+            [service[i], service[i + 1], service[i + 2]],
+            service[i + 3],
+        ));
         i += 4;
     }
     out
 }
 
 /// Converte 3 bytes em código DTC padrão (ex.: P0238, C1A77, U0401).
+///
+/// Os dois primeiros bytes são o código base; o terceiro é o tipo de falha
+/// (sufixo após o hífen, ex.: `C1A13-08`). `00` significa sem sufixo.
 fn dtc_code(b0: u8, b1: u8, b2: u8) -> String {
+    let base = dtc_base_code(b0, b1);
+    if b2 == 0 {
+        base
+    } else {
+        format!("{base}-{b2:02X}")
+    }
+}
+
+/// Só o código base (2 bytes), ex.: `C1A13`.
+fn dtc_base_code(b0: u8, b1: u8) -> String {
     let letter = match b0 >> 6 {
         0 => 'P',
         1 => 'C',
@@ -1040,7 +1073,86 @@ fn dtc_code(b0: u8, b1: u8, b2: u8) -> String {
     };
     let d1 = (b0 >> 4) & 0x3;
     let d2 = b0 & 0x0F;
-    format!("{letter}{d1}{d2:X}{b1:02X}{b2:02X}")
+    format!("{letter}{d1}{d2:X}{b1:02X}")
+}
+
+/// Número de 16 bits usado como chave no `gdx` (byte0<<8 | byte1).
+fn dtc_number(b0: u8, b1: u8) -> u16 {
+    (b0 as u16) << 8 | b1 as u16
+}
+
+/// Resolve o caminho do pacote: o informado em `--pack`, ou o primeiro
+/// `*.sqlite` encontrado em `packs/` (ao lado do cwd ou do executável).
+fn resolve_pack(explicit: Option<&str>) -> Option<PathBuf> {
+    if let Some(p) = explicit {
+        let pb = PathBuf::from(p);
+        return pb.exists().then_some(pb);
+    }
+    let mut roots: Vec<PathBuf> = vec![PathBuf::from("packs")];
+    if let Ok(exe) = std::env::current_exe() {
+        // target/debug/car-scan.exe -> subir até a raiz do repo.
+        for anc in exe.ancestors().skip(1).take(4) {
+            roots.push(anc.join("packs"));
+        }
+    }
+    for dir in roots {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("sqlite") {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve o pacote e carrega os textos de DTC, avisando qual pacote usou.
+fn load_pack_texts(explicit: Option<&str>) -> DtcText {
+    match resolve_pack(explicit) {
+        Some(pack) => {
+            let texts = load_dtc_text(&pack);
+            println!(
+                "Textos de DTC: {} descrições de {}",
+                texts.len(),
+                pack.display()
+            );
+            texts
+        }
+        None => {
+            println!("Pacote não encontrado; DTCs serão exibidos só como código.");
+            HashMap::new()
+        }
+    }
+}
+
+/// Carrega a tabela `dtc_text` de um pacote. Qualquer erro vira um mapa vazio
+/// (os DTCs então aparecem só com o código).
+fn load_dtc_text(pack: &Path) -> DtcText {
+    let mut map = HashMap::new();
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        pack,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return map;
+    };
+    let Ok(mut stmt) = conn.prepare("SELECT number, description FROM dtc_text") else {
+        return map;
+    };
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)? as u16, r.get::<_, Option<String>>(1)?))
+    });
+    if let Ok(rows) = rows {
+        for row in rows.flatten() {
+            if let (num, Some(desc)) = row {
+                if !desc.is_empty() {
+                    map.insert(num, desc);
+                }
+            }
+        }
+    }
+    map
 }
 
 fn hexdump(b: &[u8]) -> String {
@@ -1048,4 +1160,36 @@ fn hexdump(b: &[u8]) -> String {
         .map(|x| format!("{x:02X}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodifica_codigo_dtc() {
+        // C1A13 (0x5A13) com tipo de falha 0x08 -> "C1A13-08".
+        assert_eq!(dtc_code(0x5A, 0x13, 0x08), "C1A13-08");
+        // Sem tipo de falha (0x00) -> só o código base.
+        assert_eq!(dtc_code(0x5A, 0x13, 0x00), "C1A13");
+        assert_eq!(dtc_code(0x06, 0x71, 0x00), "P0671");
+        assert_eq!(dtc_code(0xC0, 0x40, 0x11), "U0040-11");
+    }
+
+    #[test]
+    fn numero_de_16_bits_casa_com_gdx() {
+        // A chave de busca no gdx é byte0<<8 | byte1.
+        assert_eq!(dtc_number(0x5A, 0x13), 0x5A13);
+        assert_eq!(dtc_number(0x06, 0x71), 0x0671);
+    }
+
+    #[test]
+    fn decode_dtcs_separa_registros() {
+        // 59 02 FF  [5A 13 08 | status 2A]  [06 71 2F | status 24]
+        let svc = [
+            0x59, 0x02, 0xFF, 0x5A, 0x13, 0x08, 0x2A, 0x06, 0x71, 0x2F, 0x24,
+        ];
+        let v = decode_dtcs(&svc);
+        assert_eq!(v, vec![([0x5A, 0x13, 0x08], 0x2A), ([0x06, 0x71, 0x2F], 0x24)]);
+    }
 }

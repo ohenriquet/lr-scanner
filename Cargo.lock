@@ -87,6 +87,7 @@ dependencies = [
  "clap",
  "jlr-security",
  "mongoose",
+ "rusqlite",
  "serialport",
 ]
 

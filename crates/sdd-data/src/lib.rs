@@ -7,6 +7,7 @@
 
 pub mod ccf;
 pub mod db;
+pub mod dtc;
 pub mod model;
 pub mod platform;
 pub mod text;
@@ -57,6 +58,11 @@ impl SddInstall {
     /// Pasta de textos (`IDS\Xml\text`).
     pub fn text_dir(&self) -> PathBuf {
         self.xml_dir().join("text")
+    }
+
+    /// Arquivo global de descrições de DTC (`IDS\Xml\gdx.xml`, texto plano).
+    pub fn gdx_path(&self) -> PathBuf {
+        self.xml_dir().join("gdx.xml")
     }
 
     /// Existe de fato?
@@ -117,15 +123,27 @@ pub fn import_vehicle(
 
     let mut resolver = text::TextResolver::new(install.text_dir(), spec.langs.clone());
 
+    // gdx.xml: descrições de DTC (global, texto plano). Opcional — se faltar,
+    // os DTCs aparecem só como código.
+    let gdx_path = install.gdx_path();
+    let dtc_texts = if gdx_path.exists() {
+        let xml =
+            std::fs::read_to_string(&gdx_path).map_err(|e| DataError::Io(gdx_path.clone(), e))?;
+        dtc::parse(&xml)?
+    } else {
+        Vec::new()
+    };
+
     let summary = ImportSummary {
         modules: platform.modules.len(),
         networks: platform.networks.len(),
         ccf_blocks: ccf.blocks.len(),
         ccf_params: ccf.params.len(),
         ccf_options: ccf.params.iter().map(|p| p.options.len()).sum(),
+        dtc_texts: dtc_texts.len(),
     };
 
-    db::write_pack(out_db, &platform, &ccf, &mut resolver)?;
+    db::write_pack(out_db, &platform, &ccf, &dtc_texts, &mut resolver)?;
 
     Ok(summary)
 }
@@ -138,4 +156,5 @@ pub struct ImportSummary {
     pub ccf_blocks: usize,
     pub ccf_params: usize,
     pub ccf_options: usize,
+    pub dtc_texts: usize,
 }

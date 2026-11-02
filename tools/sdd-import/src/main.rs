@@ -113,13 +113,14 @@ fn main() -> Result<()> {
             let summary = sdd_data::import_vehicle(&install, &spec, &out)
                 .with_context(|| format!("importar {} {}", spec.model, spec.year_code))?;
             tracing::info!(
-                "pacote gravado em {}: {} módulos, {} redes, {} blocos CCF, {} parâmetros, {} opções",
+                "pacote gravado em {}: {} módulos, {} redes, {} blocos CCF, {} parâmetros, {} opções, {} textos de DTC",
                 out.display(),
                 summary.modules,
                 summary.networks,
                 summary.ccf_blocks,
                 summary.ccf_params,
                 summary.ccf_options,
+                summary.dtc_texts,
             );
             Ok(())
         }

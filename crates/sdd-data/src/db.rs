@@ -8,6 +8,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use crate::ccf::CcfData;
+use crate::dtc::DtcText;
 use crate::model::CcfRole;
 use crate::platform::Platform;
 use crate::text::TextResolver;
@@ -98,6 +99,12 @@ CREATE TABLE ccf_option (
     label     TEXT              -- texto resolvido (ou literal)
 );
 CREATE INDEX idx_option_param ON ccf_option(param_id);
+
+CREATE TABLE dtc_text (
+    number      INTEGER PRIMARY KEY,   -- byte0<<8 | byte1 (16 bits)
+    code        TEXT NOT NULL,         -- código legível (ex.: C1A13)
+    description TEXT                    -- descrição (inglês)
+);
 "#;
 
 /// Cria (ou recria) o pacote SQLite e grava todos os dados.
@@ -105,6 +112,7 @@ pub fn write_pack(
     out_db: &Path,
     platform: &Platform,
     ccf: &CcfData,
+    dtc_texts: &[DtcText],
     resolver: &mut TextResolver,
 ) -> Result<(), crate::DataError> {
     if out_db.exists() {
@@ -225,6 +233,16 @@ pub fn write_pack(
                 "INSERT INTO ccf_option (param_id, value, name, code, label) VALUES (?,?,?,?,?)",
                 params![param_id, o.value, o.name, o.code, label],
             )?;
+        }
+    }
+
+    // dtc_text (global; INSERT OR IGNORE tolera números duplicados no gdx).
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR IGNORE INTO dtc_text (number, code, description) VALUES (?,?,?)",
+        )?;
+        for d in dtc_texts {
+            stmt.execute(params![d.number, d.code, d.description])?;
         }
     }
 
