@@ -35,14 +35,39 @@ class JlrBridge {
 
   JlrBridge._(this._lib);
 
-  /// Abre a biblioteca nativa. `path` opcional; senão usa o nome por plataforma.
-  factory JlrBridge.open([String? path]) =>
-      JlrBridge._(DynamicLibrary.open(path ?? _defaultLib()));
+  /// Abre a biblioteca nativa. `path` opcional; senão procura em locais por
+  /// plataforma (ao lado do executável, no bundle .app, etc.).
+  factory JlrBridge.open([String? path]) {
+    if (path != null) return JlrBridge._(DynamicLibrary.open(path));
+    Object? lastErr;
+    for (final cand in _candidates()) {
+      try {
+        return JlrBridge._(DynamicLibrary.open(cand));
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw Exception('ponte nativa não encontrada (jlr_bridge): $lastErr');
+  }
 
-  static String _defaultLib() {
-    if (Platform.isWindows) return 'jlr_bridge.dll';
-    if (Platform.isMacOS) return 'libjlr_bridge.dylib';
-    return 'libjlr_bridge.so';
+  /// Candidatos de caminho da lib, por plataforma. No Android a .so vem do APK
+  /// (nome puro); no desktop fica relativa ao executável/bundle.
+  static List<String> _candidates() {
+    if (Platform.isAndroid) return const ['libjlr_bridge.so'];
+    final dir = File(Platform.resolvedExecutable).parent.path;
+    if (Platform.isWindows) {
+      return ['$dir\\jlr_bridge.dll', 'jlr_bridge.dll'];
+    }
+    if (Platform.isMacOS) {
+      // flutter macOS: libs ficam em <App>.app/Contents/Frameworks/.
+      return [
+        '$dir/../Frameworks/libjlr_bridge.dylib',
+        '$dir/libjlr_bridge.dylib',
+        'libjlr_bridge.dylib',
+      ];
+    }
+    // Linux: flutter bundla em lib/ ao lado do executável.
+    return ['$dir/lib/libjlr_bridge.so', '$dir/libjlr_bridge.so', 'libjlr_bridge.so'];
   }
 
   Map<String, dynamic> _call(Pointer<Utf8> p) {
