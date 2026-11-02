@@ -461,15 +461,28 @@ class _FalhasScreenState extends State<FalhasScreen> {
             child: Row(children: [
               Expanded(
                 child: Text(
-                  entries.isEmpty
-                      ? 'Nenhuma falha na memória'
-                      : '$nConf confirmada${nConf == 1 ? '' : 's'} · ${entries.length} na memória',
+                  car.dtcsScanning
+                      ? 'Lendo falhas… ${car.dtcScanDone}/${car.dtcScanTotal} módulos'
+                      : entries.isEmpty
+                          ? 'Nenhuma falha na memória'
+                          : '$nConf confirmada${nConf == 1 ? '' : 's'} · ${entries.length} na memória',
                   style: const TextStyle(
                       fontWeight: FontWeight.w700, fontSize: 13),
                 ),
               ),
+              if (car.dtcsScanning)
+                const Padding(
+                  padding: EdgeInsets.only(right: 10),
+                  child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: C.accent)),
+                ),
               TextButton.icon(
-                onPressed: car.reading ? null : () => car.refresh(),
+                onPressed: (car.reading || car.dtcsScanning)
+                    ? null
+                    : () => car.refresh(),
                 icon: const Icon(Icons.refresh, size: 16),
                 label: const Text('Reler'),
               ),
@@ -479,7 +492,10 @@ class _FalhasScreenState extends State<FalhasScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 20),
               child: Center(
-                  child: Text('Nenhuma falha na memória.',
+                  child: Text(
+                      car.dtcsScanning
+                          ? 'Lendo falhas…'
+                          : 'Nenhuma falha na memória.',
                       style: TextStyle(color: C.ink3))),
             ),
           for (final e in entries) _activeTile(e.$1, e.$2, e.$3),

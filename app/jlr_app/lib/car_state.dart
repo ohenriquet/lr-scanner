@@ -21,9 +21,14 @@ class CarState extends ChangeNotifier {
   /// Siglas de módulos que responderam ao scan.
   final Set<String> online = {};
 
-  /// Falhas ativas lidas do carro: módulo -> [(código, status)].
+  /// Falhas lidas do carro: módulo -> [(código, status)].
   Map<String, List<(String, int)>> activeDtcs = {};
   bool reading = false;
+
+  /// Leitura de DTCs em segundo plano (por módulo), com progresso.
+  bool dtcsScanning = false;
+  int dtcScanDone = 0;
+  int dtcScanTotal = 0;
 
   /// Imagem do CCF lida do BCM (DID 0xDE00), ou null se não lida.
   List<int>? ccfImage;
@@ -112,27 +117,58 @@ class CarState extends ChangeNotifier {
   }
 
   /// Relê VIN, varre módulos e lê as falhas ativas.
+  /// Conexão RÁPIDA: lê VIN + varre módulos e já libera o "conectado" (spinner
+  /// sai). As falhas (por módulo) e o CCF são lidos EM SEGUNDO PLANO, sem travar
+  /// a UI — a tela de falhas mostra o progresso e vai preenchendo.
   Future<void> refresh() async {
     if (!connected) return;
     reading = true;
+    activeDtcs = {};
     notifyListeners();
+    List<List<dynamic>> present = const [];
     try {
       vin = await link.vin();
-      notifyListeners(); // mostra o VIN assim que chega
-      final present = await link.scan(_moduleList());
+      notifyListeners(); // VIN na hora
+      present = await link.scan(_moduleList());
       online
         ..clear()
         ..addAll(present.map((e) => e[0].toString()));
-      notifyListeners(); // mostra os módulos presentes já
-      activeDtcs = await link.dtcs(present);
-      notifyListeners(); // mostra as falhas antes de ler o CCF
-      await readCcf();
     } catch (e) {
       connectError = '$e';
     } finally {
       reading = false;
+      notifyListeners(); // conectado: VIN + módulos visíveis, spinner sai
+    }
+    if (!connected) return;
+    // Em segundo plano, sem await: não bloqueiam o "conectado".
+    unawaited(readCcf());
+    unawaited(_scanDtcs(present));
+  }
+
+  /// Lê os DTCs um módulo por vez, atualizando a UI a cada módulo.
+  Future<void> _scanDtcs(List<List<dynamic>> present) async {
+    final seen = <String>{};
+    final uniq =
+        present.where((e) => seen.add('${e[1]}:${e[2]}')).toList(); // dedup
+    dtcsScanning = true;
+    dtcScanTotal = uniq.length;
+    dtcScanDone = 0;
+    notifyListeners();
+    for (final m in uniq) {
+      if (!connected) break;
+      try {
+        final one = await link.dtcs([m]);
+        one.forEach((mod, list) {
+          if (list.isNotEmpty) activeDtcs[mod] = list;
+        });
+      } catch (_) {
+        // módulo que falhou não trava o resto
+      }
+      dtcScanDone++;
       notifyListeners();
     }
+    dtcsScanning = false;
+    notifyListeners();
   }
 
   /// Lê o CCF do BCM (DID 0xDE00) via a mesma leitura 0x22 usada nos DIDs.
