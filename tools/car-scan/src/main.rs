@@ -8,6 +8,8 @@
 use std::io::{Read, Write};
 use std::time::Duration;
 
+mod ccf_checksum;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use mongoose::client::Device;
@@ -141,6 +143,29 @@ enum Command {
         #[arg(long)]
         constant: String,
     },
+    /// Teste seguro da tubulação: lê o CCF, desbloqueia e REGRAVA os MESMOS
+    /// bytes (não muda nada), depois confere a releitura. ESCREVE (idêntico):
+    /// exige --yes. Precisa da constante do BCM.
+    CcfWriteback {
+        #[arg(long)]
+        constant: String,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Altera UM byte do CCF (offset absoluto na imagem do DID 0xDE00),
+    /// recalcula o checksum, grava e confere. ESCREVE: exige --yes.
+    CcfSet {
+        #[arg(long)]
+        constant: String,
+        /// Offset absoluto (decimal) na imagem do CCF.
+        #[arg(long)]
+        offset: usize,
+        /// Novo valor do byte (hex, ex.: 02).
+        #[arg(long)]
+        value: String,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -193,14 +218,155 @@ fn main() -> Result<()> {
             raw(&mut dev, &module, &hex, extended)?;
         }
         Command::CcfUnlock { constant } => {
-            let c = parse_hex(&constant)?;
-            anyhow::ensure!(c.len() == 5, "a constante deve ter 5 bytes");
-            let mut c5 = [0u8; 5];
-            c5.copy_from_slice(&c);
-            unlock_bcm(&mut dev, c5)?;
+            unlock_bcm(&mut dev, parse_constant(&constant)?)?;
+        }
+        Command::CcfWriteback { constant, yes } => {
+            ccf_writeback(&mut dev, parse_constant(&constant)?, yes)?;
+        }
+        Command::CcfSet {
+            constant,
+            offset,
+            value,
+            yes,
+        } => {
+            let v = parse_hex(&value)?;
+            anyhow::ensure!(v.len() == 1, "o valor deve ser 1 byte");
+            ccf_set(&mut dev, parse_constant(&constant)?, offset, v[0], yes)?;
         }
     }
     Ok(())
+}
+
+fn parse_constant(s: &str) -> Result<[u8; 5]> {
+    let c = parse_hex(s)?;
+    anyhow::ensure!(c.len() == 5, "a constante deve ter 5 bytes");
+    let mut c5 = [0u8; 5];
+    c5.copy_from_slice(&c);
+    Ok(c5)
+}
+
+/// Lê a imagem do CCF (1024 bytes) do BCM via DID 0xDE00.
+fn read_ccf_image<T: Transport>(dev: &mut Device<T>) -> Result<Vec<u8>> {
+    dev.add_flow_control_filter(BCM_RESP, BCM_REQ)
+        .map_err(|e| anyhow::anyhow!("filtro BCM: {e:?}"))?;
+    let answers = dev
+        .request_iso_tp(BCM_REQ, &[0x22, 0xDE, 0x00], Duration::from_millis(2500))
+        .map_err(|e| anyhow::anyhow!("ler CCF: {e:?}"))?;
+    let data = find_positive(&answers, BCM_RESP).context("CCF não lido (sem resposta positiva)")?;
+    Ok(data[3..].to_vec())
+}
+
+/// Grava a imagem do CCF no BCM via WriteDataByIdentifier (0x2E DE00).
+/// Requer o módulo já desbloqueado e em sessão estendida. Retorna Ok(true)
+/// se o módulo respondeu positivamente (0x6E DE00).
+fn write_ccf_image<T: Transport>(dev: &mut Device<T>, image: &[u8]) -> Result<bool> {
+    let mut req = vec![0x2E, 0xDE, 0x00];
+    req.extend_from_slice(image);
+    let answers = dev
+        .request_iso_tp(BCM_REQ, &req, Duration::from_millis(3000))
+        .map_err(|e| anyhow::anyhow!("gravar CCF: {e:?}"))?;
+    if answers
+        .iter()
+        .any(|r| r.service.first() == Some(&0x6E) && r.service.get(1) == Some(&0xDE))
+    {
+        Ok(true)
+    } else if let Some(neg) = answers.iter().find(|r| r.service.first() == Some(&0x7F)) {
+        let nrc = neg.service.get(2).copied().unwrap_or(0);
+        println!("Gravação recusada (NRC {nrc:#04X}).");
+        Ok(false)
+    } else {
+        println!("Sem resposta clara à gravação.");
+        Ok(false)
+    }
+}
+
+/// Teste seguro: lê o CCF, faz backup, desbloqueia, regrava os MESMOS bytes
+/// e confere a releitura. Não muda nenhuma configuração.
+fn ccf_writeback<T: Transport>(dev: &mut Device<T>, constant: [u8; 5], yes: bool) -> Result<()> {
+    if !yes {
+        anyhow::bail!("regravar o CCF escreve no módulo (mesmo idêntico). Repita com --yes.");
+    }
+    let original = read_ccf_image(dev)?;
+    println!("CCF lido: {} bytes.", original.len());
+    let backup = format!("backups/ccf_writeback_{}.bin", timestamp());
+    std::fs::create_dir_all("backups").ok();
+    std::fs::write(&backup, &original).ok();
+    println!("Backup salvo em {backup}");
+
+    if !unlock_bcm(dev, constant)? {
+        anyhow::bail!("não foi possível desbloquear o BCM; nada gravado.");
+    }
+
+    println!("Regravando os MESMOS {} bytes...", original.len());
+    if !write_ccf_image(dev, &original)? {
+        anyhow::bail!("gravação não confirmada.");
+    }
+    println!("Gravação confirmada. Conferindo releitura...");
+
+    // Volta à sessão padrão e relê.
+    let _ = dev.request_iso_tp(BCM_REQ, &[0x10, 0x01], Duration::from_millis(400));
+    let reread = read_ccf_image(dev)?;
+    if reread == original {
+        println!("\n*** OK: releitura idêntica. Tubulação de escrita validada. ***");
+    } else {
+        println!("\nATENÇÃO: releitura difere do gravado. Backup em {backup}.");
+        let diffs = original.iter().zip(&reread).filter(|(a, b)| a != b).count();
+        println!("{diffs} bytes diferentes.");
+    }
+    Ok(())
+}
+
+/// Altera um byte do CCF, recalcula o checksum, grava e confere.
+fn ccf_set<T: Transport>(
+    dev: &mut Device<T>,
+    constant: [u8; 5],
+    offset: usize,
+    value: u8,
+    yes: bool,
+) -> Result<()> {
+    if !yes {
+        anyhow::bail!("alterar o CCF escreve no módulo. Repita com --yes.");
+    }
+    let original = read_ccf_image(dev)?;
+    anyhow::ensure!(offset < original.len(), "offset fora da imagem");
+    println!(
+        "CCF lido: {} bytes. Byte {offset}: 0x{:02X} -> 0x{value:02X}",
+        original.len(),
+        original[offset]
+    );
+    let backup = format!("backups/ccf_before_set_{}.bin", timestamp());
+    std::fs::create_dir_all("backups").ok();
+    std::fs::write(&backup, &original).ok();
+    println!("Backup salvo em {backup}");
+
+    let mut modified = original.clone();
+    modified[offset] = value;
+    // Recalcula o checksum (preenchido após reconstruir o algoritmo).
+    ccf_checksum::fix_checksums(&mut modified).context("recalcular checksum do CCF")?;
+
+    if !unlock_bcm(dev, constant)? {
+        anyhow::bail!("não foi possível desbloquear o BCM; nada gravado.");
+    }
+    if !write_ccf_image(dev, &modified)? {
+        anyhow::bail!("gravação não confirmada.");
+    }
+    println!("Gravação confirmada. Conferindo...");
+    let _ = dev.request_iso_tp(BCM_REQ, &[0x10, 0x01], Duration::from_millis(400));
+    let reread = read_ccf_image(dev)?;
+    if reread.get(offset) == Some(&value) {
+        println!("\n*** OK: byte {offset} agora é 0x{value:02X} no módulo. ***");
+        println!("Backup do estado anterior: {backup}");
+    } else {
+        println!("\nATENÇÃO: o byte não mudou como esperado. Backup em {backup}.");
+    }
+    Ok(())
+}
+
+fn timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 const BCM_REQ: u16 = 0x726;
