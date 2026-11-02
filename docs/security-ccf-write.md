@@ -79,3 +79,26 @@ checksum ≡ 0 mod 256). Posições na imagem do DID 0xDE00: EUCD checksum em
 faixa exata de cada um (o SDD soma sobre o buffer VBF, cujo layout difere da
 imagem crua). Enquanto não fechado, `ccf-set` fica bloqueado; `ccf-writeback`
 (regravar idêntico) não precisa do checksum.
+
+## Sequência de gravação mapeada no carro (MY12 BCM)
+
+Validado no BCM real da Discovery 4, via ISO-TP de software:
+1. `0x10 03` (sessão estendida) — ok.
+2. `0x27 03`/`0x04` desbloqueio DIAGNÓSTICO (constante DC0164) — ACEITO.
+3. `0x10 02` (sessão de programação) — ok (módulo segue vivo, 0x3E → 0x7E).
+4. `0x27 01`/`0x02` desbloqueio de PROGRAMAÇÃO (constante DC0163) — ACEITO.
+   O mesmo algoritmo `jlr-security` vale para o nível de programação.
+5. `0x34` RequestDownload — suportado SÓ na sessão de programação; com a
+   segurança ok responde `0x7F 34 31` (requestOutOfRange) para os endereços
+   do CCF (0xFFAC00, blocos e região). Ou seja, o 0x34 padrão aponta para a
+   região de firmware, não para o CCF.
+
+Conclusão: a gravação do CCF NÃO é um RequestDownload comum para 0xFFAC00.
+É um mecanismo específico do SDD (provável DID/rotina proprietária ou um
+RequestDownload com endereço/formato lógico diferente). Para fechar com
+segurança, o caminho confiável é CAPTURAR o SDD gravando um CCF (shim J2534)
+e copiar a sequência exata (formato, endereço, tamanho do bloco, checksum).
+
+Já está validado e pronto: todo o encadeamento de sessão e segurança
+(diagnóstico E programação) no módulo real, e o ISO-TP de software para
+enviar/receber qualquer tamanho dentro do buffer de 128 bytes do BCM.

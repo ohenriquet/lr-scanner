@@ -150,6 +150,31 @@ enum Command {
         #[arg(long)]
         size: usize,
     },
+    /// Sonda a sequência de flash: desbloqueia e envia RequestDownload (0x34)
+    /// para um endereço/tamanho, mostra a resposta e aborta com 0x37.
+    /// NÃO transfere dados (não grava). Precisa da constante.
+    ProbeDownload {
+        #[arg(long)]
+        constant: String,
+        /// Endereço (hex, ex.: 00FFAC00). Padrão: bloco 1 do CCF.
+        #[arg(long, default_value = "00FFAC00")]
+        addr: String,
+        /// Tamanho em bytes (decimal). Padrão: 196 (bloco 1).
+        #[arg(long, default_value_t = 196)]
+        size: u32,
+    },
+    /// Sonda o caminho de PROGRAMAÇÃO: desbloqueia na sessão estendida
+    /// (constante diagnóstica DC0164), troca para a sessão de programação
+    /// (0x10 02), desbloqueia a segurança de programação (DC0163) e tenta
+    /// RequestDownload. NÃO transfere dados.
+    ProbeProg {
+        /// Constante diagnóstica do BCM (DC0164) em hex, 5 bytes.
+        #[arg(long)]
+        constant: String,
+        /// Constante de programação do BCM (DC0163) em hex, 5 bytes.
+        #[arg(long)]
+        prog_constant: String,
+    },
     /// Teste seguro da tubulação: lê o CCF, desbloqueia e REGRAVA os MESMOS
     /// bytes (não muda nada), depois confere a releitura. ESCREVE (idêntico):
     /// exige --yes. Precisa da constante do BCM.
@@ -236,6 +261,29 @@ fn main() -> Result<()> {
                 Ok(r) => println!("Resposta: {}", hexdump(&r)),
                 Err(e) => println!("Falha: {e}"),
             }
+        }
+        Command::ProbeDownload {
+            constant,
+            addr,
+            size,
+        } => {
+            let c = parse_constant(&constant)?;
+            let addr = u32::from_str_radix(addr.trim_start_matches("0x"), 16)
+                .context("endereço hex inválido")?;
+            sw_setup(&mut dev)?;
+            if !unlock_bcm_sw(&mut dev, c)? {
+                anyhow::bail!("não desbloqueou; abortado.");
+            }
+            probe_download(&mut dev, addr, size)?;
+        }
+        Command::ProbeProg {
+            constant,
+            prog_constant,
+        } => {
+            let c = parse_constant(&constant)?;
+            let pc = parse_constant(&prog_constant)?;
+            sw_setup(&mut dev)?;
+            probe_prog(&mut dev, c, pc)?;
         }
         Command::CcfWriteback { constant, yes } => {
             ccf_writeback(&mut dev, parse_constant(&constant)?, yes)?;
@@ -329,6 +377,109 @@ fn unlock_bcm_sw<T: Transport<Error: 'static>>(
         println!("Chave recusada (sw): {}", hexdump(&r));
         Ok(false)
     }
+}
+
+/// Sonda a sequência de flash: envia RequestDownload (0x34) com vários
+/// formatos de identificador de endereço/tamanho e mostra a resposta do BCM.
+/// Aborta com RequestTransferExit (0x37). Não transfere dados (não grava).
+fn probe_download<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    addr: u32,
+    size: u32,
+) -> Result<()> {
+    // dataFormatIdentifier 0x00 (sem compressão/cripto); tenta formatos de
+    // endereço comuns: 0x44 (4+4), 0x33 (3+3), 0x14/0x24.
+    for fmt in [0x44u8, 0x33, 0x24, 0x14] {
+        let asize = (fmt & 0x0f) as usize; // nº de bytes do endereço
+        let ssize = ((fmt >> 4) & 0x0f) as usize; // nº de bytes do tamanho
+        let mut req = vec![0x34, 0x00, fmt];
+        req.extend_from_slice(&addr.to_be_bytes()[4 - asize..]);
+        req.extend_from_slice(&size.to_be_bytes()[4 - ssize..]);
+        println!("RequestDownload fmt {fmt:#04X}: enviando {}", hexdump(&req));
+        let r = sw_uds(dev, &req, 2500)?;
+        println!("  resp: {}", hexdump(&r));
+        if r.first() == Some(&0x74) {
+            println!(
+                "  >>> ACEITO. maxNumberOfBlockLength e formato: {}",
+                hexdump(&r)
+            );
+            let exit = sw_uds(dev, &[0x37], 2500).unwrap_or_default();
+            println!("  TransferExit (abortar): {}", hexdump(&exit));
+            return Ok(());
+        }
+        // 0x7F 34 NRC: mostra o motivo e tenta o próximo formato.
+    }
+    println!("Nenhum formato de RequestDownload foi aceito nesta sondagem.");
+    Ok(())
+}
+
+/// Sonda o caminho de programação do BCM: sessão 0x10 02, segurança de
+/// programação (seed 0x27 01, key 0x27 02, constante DC0163) e tenta
+/// RequestDownload e um 0x2E grande. Não transfere dados.
+fn probe_prog<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    diag_const: [u8; 5],
+    prog_const: [u8; 5],
+) -> Result<()> {
+    // 1) Desbloqueia na sessão estendida (diagnóstica), que já é validada.
+    if !unlock_bcm_sw(dev, diag_const)? {
+        println!("Não desbloqueou na sessão estendida; abortando.");
+        return Ok(());
+    }
+    // 2) Troca para a sessão de programação.
+    let s = sw_uds(dev, &[0x10, 0x02], 1500)?;
+    println!("Sessão de programação (0x10 02): {}", hexdump(&s));
+    std::thread::sleep(Duration::from_millis(150));
+    let tp = sw_uds(dev, &[0x3E, 0x00], 1000).unwrap_or_default();
+    println!("TesterPresent após programação: {}", hexdump(&tp));
+    // 3) Desbloqueio de PROGRAMAÇÃO: 0x27 01 (seed) / 0x27 02 (key), DC0163.
+    let seed = sw_uds(dev, &[0x27, 0x01], 1000).unwrap_or_default();
+    println!("Seed programação (0x27 01): {}", hexdump(&seed));
+    if seed.first() == Some(&0x67) && seed.len() >= 5 {
+        let s3 = [seed[2], seed[3], seed[4]];
+        if s3 != [0, 0, 0] {
+            let key = jlr_security::iso14229_key(s3, prog_const);
+            let mut k = vec![0x27, 0x02];
+            k.extend_from_slice(&key);
+            let kr = sw_uds(dev, &k, 1200).unwrap_or_default();
+            println!(
+                "Key programação (0x27 02): {} (chave {})",
+                hexdump(&kr),
+                hexdump(&key)
+            );
+            if kr.first() == Some(&0x67) {
+                println!(">>> SEGURANÇA DE PROGRAMAÇÃO DESBLOQUEADA!");
+            }
+        } else {
+            println!("Seed zero: já desbloqueado.");
+        }
+    }
+    // 4) Varre endereço/tamanho para o RequestDownload (formato 0x44).
+    let combos: &[(u32, u32, &str)] = &[
+        (0x00FF_AC00, 196, "bloco 1 (196)"),
+        (0x00FF_AC00, 0x2BA, "config inteiro (698)"),
+        (0x00FF_AC00, 0x400, "região (1024)"),
+        (0x00FF_ACC4, 252, "bloco EUCD (252)"),
+        (0x00FF_AC00, 698, "config (698 dec)"),
+    ];
+    for &(addr, size, label) in combos {
+        let mut rd = vec![0x34, 0x00, 0x44];
+        rd.extend_from_slice(&addr.to_be_bytes());
+        rd.extend_from_slice(&size.to_be_bytes());
+        let r = sw_uds(dev, &rd, 2500)?;
+        println!(
+            "RequestDownload {label} {addr:#010X}/{size}: {}",
+            hexdump(&r)
+        );
+        if r.first() == Some(&0x74) {
+            println!(">>> ACEITO! A resposta traz o maxNumberOfBlockLength.");
+            let exit = sw_uds(dev, &[0x37], 2000).unwrap_or_default();
+            println!("TransferExit (abortar): {}", hexdump(&exit));
+            return Ok(());
+        }
+    }
+    println!("Nenhuma combinação de endereço/tamanho foi aceita nesta sondagem.");
+    Ok(())
 }
 
 /// Lê o CCF pela via de software (0x22 DE00).
