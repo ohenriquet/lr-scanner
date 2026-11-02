@@ -143,7 +143,8 @@ CREATE TABLE did_param (
     quantity     TEXT,
     multiplier   REAL,
     offset       REAL,
-    offset_first INTEGER          -- 1: (raw+offset)*mult ; 0: raw*mult+offset
+    offset_first INTEGER,         -- 1: (raw+offset)*mult ; 0: raw*mult+offset
+    source       TEXT             -- fmt: byte_lsb/msb=byte+mask ; mdl: =bit, cru
 );
 CREATE INDEX idx_didparam_ref ON did_param(did_ref);
 
@@ -321,8 +322,8 @@ pub fn write_pack(
         let mut stmt_param = tx.prepare(
             "INSERT INTO did_param
              (did_ref, ord, name, byte_lsb, byte_msb, mask, shift, bit_level,
-              converter, kind, unit, quantity, multiplier, offset, offset_first)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              converter, kind, unit, quantity, multiplier, offset, offset_first, source)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         )?;
         for (i, e) in did_catalog.entries.iter().enumerate() {
             let did_id = (i + 1) as i64;
@@ -352,6 +353,10 @@ pub fn write_pack(
                     ),
                     None => (None, None, None, None, None, None),
                 };
+                let source = match p.source {
+                    crate::did::ParamSource::Formatting => "fmt",
+                    crate::did::ParamSource::Mdl => "mdl",
+                };
                 stmt_param.execute(params![
                     did_id,
                     j as i64,
@@ -368,6 +373,7 @@ pub fn write_pack(
                     mult,
                     off,
                     off_first,
+                    source,
                 ])?;
                 // Estados de enum: uma vez por conversor.
                 if let Some(c) = conv {

@@ -203,7 +203,7 @@ fn cmd_did_dump(pack: &std::path::Path, module: Option<&str>, filter: Option<&st
     let module = module.to_uppercase();
     let mut stmt = conn.prepare(
         "SELECT d.did, p.name, p.byte_lsb, p.byte_msb, p.mask, p.bit_level,
-                p.kind, p.unit, p.multiplier, p.offset, p.offset_first, p.converter
+                p.kind, p.unit, p.multiplier, p.offset, p.offset_first, p.source
          FROM did d JOIN did_param p ON p.did_ref = d.id
          WHERE d.module = ?1
          ORDER BY d.did, p.ord",
@@ -220,6 +220,7 @@ fn cmd_did_dump(pack: &std::path::Path, module: Option<&str>, filter: Option<&st
             bit: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
             lsb: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
             msb: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+            source: r.get::<_, Option<String>>(11)?.unwrap_or_default(),
         })
     })?;
 
@@ -247,7 +248,9 @@ fn cmd_did_dump(pack: &std::path::Path, module: Option<&str>, filter: Option<&st
             }
             _ => String::new(),
         };
-        let loc = if r.bit {
+        let loc = if r.source == "mdl" {
+            format!("bits {}..{} cru", r.lsb, r.msb)
+        } else if r.bit {
             format!("byte {}..{} bits", r.lsb, r.msb)
         } else {
             format!("byte {}..{}", r.lsb, r.msb)
@@ -269,6 +272,7 @@ struct DidRow {
     bit: bool,
     lsb: i64,
     msb: i64,
+    source: String,
 }
 
 /// Imprime o help de diagnóstico de um DTC a partir de um pacote.

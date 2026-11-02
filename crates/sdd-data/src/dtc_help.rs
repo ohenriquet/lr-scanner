@@ -143,11 +143,9 @@ pub fn parse(xml: &str, model_filter: Option<&str>) -> Result<Option<DtcHelp>, c
                         }
                     }
                 }
-                b"dtcCode" => {
-                    if in_code {
-                        code = buf.trim().to_string();
-                        in_code = false;
-                    }
+                b"dtcCode" if in_code => {
+                    code = buf.trim().to_string();
+                    in_code = false;
                 }
                 _ => {}
             },

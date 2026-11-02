@@ -266,13 +266,24 @@ fn load_did_catalog(
         }
     }
 
-    // DIDs "Unqualified" (sem módulo no formatting): ligá-los aos módulos do
-    // veículo pelo mdl.xml (DID -> módulos). Resolve, p.ex., a suspensão a ar
-    // (alturas 0x3B03-06 lidas do RLM no L319). Module/Fully têm precedência.
-    let did_modules = std::fs::read_to_string(install.mdl_path())
+    // mdl.xml liga cada DID aos módulos que o leem (e traz nome/faixa de bits).
+    let mdl_signals = std::fs::read_to_string(install.mdl_path())
         .ok()
         .map(|xml| did::parse_mdl(&xml))
         .unwrap_or_default();
+    let mut did_modules: HashMap<u16, HashSet<String>> = HashMap::new();
+    let mut did_signals: HashMap<u16, Vec<&did::MdlSignal>> = HashMap::new();
+    for s in &mdl_signals {
+        did_modules
+            .entry(s.did)
+            .or_default()
+            .extend(s.modules.iter().cloned());
+        did_signals.entry(s.did).or_default().push(s);
+    }
+
+    // (a) DIDs "Unqualified" do formatting (sem módulo): ligá-los aos módulos do
+    // veículo pelo mdl. Resolve, p.ex., as alturas da suspensão (0x3B03-06 no
+    // RLM) com a escala do formatting. Module/Fully têm precedência.
     if !did_modules.is_empty() {
         let unq = [
             ("Unqualified DID Formatting.xml", false),
@@ -293,14 +304,61 @@ fn load_did_catalog(
                     if !module_set.contains(m.as_str()) {
                         continue;
                     }
-                    let key = (m.clone(), e.did);
-                    best.entry(key).or_insert_with(|| {
+                    best.entry((m.clone(), e.did)).or_insert_with(|| {
                         let mut bound = e.clone();
                         bound.module = Some(m.clone());
                         bound
                     });
                 }
             }
+        }
+    }
+
+    // (b) Complemento: sinais do mdl que o formatting não cobre entram como
+    // valor cru (nome + faixa de bits), por módulo do veículo. Traz, p.ex., a
+    // tensão do compressor e as correntes das válvulas da suspensão (RLM).
+    for (did_num, sigs) in &did_signals {
+        let mods: HashSet<&str> = sigs
+            .iter()
+            .flat_map(|s| s.modules.iter().map(String::as_str))
+            .filter(|m| module_set.contains(m))
+            .collect();
+        for m in mods {
+            let key = (m.to_string(), *did_num);
+            if best.contains_key(&key) {
+                continue; // formatting (com escala) tem precedência
+            }
+            let params: Vec<did::DidParam> = sigs
+                .iter()
+                .filter(|s| s.modules.iter().any(|x| x == m))
+                .map(|s| did::DidParam {
+                    name: s.name.clone(),
+                    byte_lsb: s.lsb,
+                    byte_msb: s.msb,
+                    mask: 0,
+                    shift: 0,
+                    bit_level: true,
+                    converter: None,
+                    source: did::ParamSource::Mdl,
+                })
+                .collect();
+            if params.is_empty() {
+                continue;
+            }
+            best.insert(
+                key,
+                did::DidEntry {
+                    did: *did_num,
+                    module: Some(m.to_string()),
+                    model: None,
+                    year: None,
+                    vtype: None,
+                    subtype: None,
+                    data_size: None,
+                    qual: did::Qual::Unqualified,
+                    params,
+                },
+            );
         }
     }
 

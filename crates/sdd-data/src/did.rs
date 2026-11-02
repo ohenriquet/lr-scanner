@@ -30,13 +30,23 @@ pub enum Qual {
     Fully = 2,
 }
 
+/// Origem de um parâmetro: do DID Formatting (com escala) ou do mdl.xml (cru).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParamSource {
+    /// DID Formatting: `byte_lsb`/`byte_msb` são índices de byte + `mask`/`shift`.
+    #[default]
+    Formatting,
+    /// mdl.xml: `byte_lsb`/`byte_msb` são índices de BIT; valor cru (sem conversor).
+    Mdl,
+}
+
 /// Um parâmetro de leitura dentro de um DID.
 #[derive(Debug, Clone, Default)]
 pub struct DidParam {
     pub name: String,
-    /// Índice do byte menos significativo dentro do dado do DID.
+    /// Índice do byte (Formatting) ou do bit (Mdl) menos significativo.
     pub byte_lsb: i32,
-    /// Índice do byte mais significativo.
+    /// Índice do byte (Formatting) ou do bit (Mdl) mais significativo.
     pub byte_msb: i32,
     /// Máscara aplicada (0 = sem máscara).
     pub mask: u32,
@@ -46,6 +56,8 @@ pub struct DidParam {
     pub bit_level: bool,
     /// Id do conversor de escala (`CVT_*` / `CNV_*`), se houver.
     pub converter: Option<String>,
+    /// De onde veio (define como interpretar `byte_lsb`/`byte_msb`).
+    pub source: ParamSource,
 }
 
 /// Um DID de leitura de um módulo.
@@ -98,7 +110,7 @@ pub struct Converter {
     pub states: Vec<(i64, i64, String)>,
 }
 
-fn attr<'a>(e: &'a quick_xml::events::BytesStart, key: &str) -> Option<String> {
+fn attr(e: &quick_xml::events::BytesStart, key: &str) -> Option<String> {
     e.attributes()
         .flatten()
         .find(|a| a.key.as_ref() == key.as_bytes())
@@ -277,20 +289,34 @@ pub fn parse_did_formatting(
     Ok(out)
 }
 
-/// Faz o parse do `mdl.xml` (dicionário de PIDs) e devolve, para cada DID
-/// (16 bits), o conjunto de módulos que o suportam.
+/// Um sinal de live data do `mdl.xml`: um campo de um DID (bit range + nome),
+/// com os módulos que o leem. Um DID pode ter vários sinais (sub-campos).
+#[derive(Debug, Clone)]
+pub struct MdlSignal {
+    pub did: u16,
+    pub name: String,
+    /// Bit menos significativo do campo dentro do dado do DID.
+    pub lsb: i32,
+    /// Bit mais significativo.
+    pub msb: i32,
+    pub modules: std::collections::HashSet<String>,
+}
+
+/// Faz o parse do `mdl.xml` (dicionário de PIDs): devolve cada sinal (campo de
+/// um DID) com nome, faixa de bits e os módulos que o leem.
 ///
-/// Serve para ligar os DIDs "Unqualified" (sem módulo no DID Formatting) aos
-/// módulos reais do veículo. Ex.: `<s id="3B03" name="Front left corner
-/// height">...<m id="RLM"/>...` -> 0x3B03 é lido do RLM.
-pub fn parse_mdl(xml: &str) -> std::collections::HashMap<u16, std::collections::HashSet<String>> {
-    use std::collections::{HashMap, HashSet};
+/// Serve para (a) ligar os DIDs "Unqualified" do DID Formatting aos módulos do
+/// veículo e (b) complementar o catálogo com sinais que o formatting não cobre
+/// (ex.: correntes das válvulas e tensão do compressor da suspensão no RLM).
+/// Ex.: `<s id="3B03" lsb="0" msb="15" name="Front left corner height">...<m
+/// id="RLM"/>...`.
+pub fn parse_mdl(xml: &str) -> Vec<MdlSignal> {
+    use std::collections::HashSet;
     let mut reader = Reader::from_str(xml);
-    let mut map: HashMap<u16, HashSet<String>> = HashMap::new();
+    let mut out = Vec::new();
 
     let mut s_depth = 0u32;
-    let mut cur_did: Option<u16> = None;
-    let mut cur_mods: HashSet<String> = HashSet::new();
+    let mut cur: Option<MdlSignal> = None;
 
     loop {
         match reader.read_event() {
@@ -298,31 +324,38 @@ pub fn parse_mdl(xml: &str) -> std::collections::HashMap<u16, std::collections::
             // `<s>` com conteúdo: abre um sinal (normalmente não aninha).
             Ok(Event::Start(e)) if e.name().as_ref() == b"s" => {
                 if s_depth == 0 {
-                    cur_did = attr(&e, "id").and_then(|s| u16::from_str_radix(&s, 16).ok());
-                    cur_mods.clear();
+                    cur = attr(&e, "id")
+                        .and_then(|s| u16::from_str_radix(&s, 16).ok())
+                        .map(|did| MdlSignal {
+                            did,
+                            name: attr(&e, "name").unwrap_or_default(),
+                            lsb: attr(&e, "lsb").and_then(|s| s.parse().ok()).unwrap_or(0),
+                            msb: attr(&e, "msb").and_then(|s| s.parse().ok()).unwrap_or(0),
+                            modules: HashSet::new(),
+                        });
                 }
                 s_depth += 1;
             }
             Ok(Event::End(e)) if e.name().as_ref() == b"s" => {
                 s_depth = s_depth.saturating_sub(1);
                 if s_depth == 0 {
-                    if let Some(did) = cur_did.take() {
-                        map.entry(did).or_default().extend(cur_mods.drain());
+                    if let Some(sig) = cur.take() {
+                        out.push(sig);
                     }
                 }
             }
-            // `<m id=MOD/>`: módulo que suporta o sinal corrente.
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                if e.name().as_ref() == b"m" && s_depth > 0 {
-                    if let Some(id) = attr(&e, "id") {
-                        cur_mods.insert(id);
-                    }
+            // `<m id=MOD/>`: módulo que lê o sinal corrente.
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.name().as_ref() == b"m" && s_depth > 0 =>
+            {
+                if let (Some(id), Some(sig)) = (attr(&e, "id"), cur.as_mut()) {
+                    sig.modules.insert(id);
                 }
             }
             _ => {}
         }
     }
-    map
+    out
 }
 
 /// Faz o parse de um arquivo de conversor.
@@ -377,11 +410,9 @@ pub fn parse_converter(xml: &str, id: &str) -> Converter {
                         }
                     }
                 }
-                b"name" => {
-                    if in_state {
-                        cap_name = true;
-                        buf.clear();
-                    }
+                b"name" if in_state => {
+                    cap_name = true;
+                    buf.clear();
                 }
                 _ => {}
             },
@@ -505,9 +536,17 @@ mod tests {
             <ht><qs id="1"><ms><m id="ARCM"/></ms></qs></ht></s>
           <s id="0504" name="MAF"><ms><m id="PCM"/></ms></s>
         </mdl>"#;
-        let m = parse_mdl(xml);
-        assert_eq!(m[&0x3B03], ["RLM", "CHCM", "ARCM"].into_iter().map(String::from).collect());
-        assert_eq!(m[&0x0504], ["PCM"].into_iter().map(String::from).collect());
+        let sigs = parse_mdl(xml);
+        assert_eq!(sigs.len(), 2);
+        let h = sigs.iter().find(|s| s.did == 0x3B03).unwrap();
+        assert_eq!(h.name, "Front left corner height");
+        assert_eq!((h.lsb, h.msb), (0, 15));
+        assert_eq!(
+            h.modules,
+            ["RLM", "CHCM", "ARCM"].into_iter().map(String::from).collect()
+        );
+        let maf = sigs.iter().find(|s| s.did == 0x0504).unwrap();
+        assert_eq!(maf.modules, ["PCM"].into_iter().map(String::from).collect());
     }
 
     #[test]
