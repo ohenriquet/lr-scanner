@@ -6,6 +6,7 @@ members = [
   "crates/mongoose",
   "tools/sdd-import",
   "tools/mongoose-bench",
+  "tools/car-scan",
 ]
 
 [workspace.package]

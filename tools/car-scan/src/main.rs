@@ -1,0 +1,267 @@
+//! Leitura do veículo via Mongoose (somente leitura): VIN, presença de
+//! módulos e DTCs. Comunicação ISO-TP a 500 kbps nos pinos 6/14 (HS-CAN); o
+//! gateway encaminha os módulos de MS-CAN.
+//!
+//! Este utilitário NÃO escreve nada no veículo. Limpar DTCs é um comando à
+//! parte, explícito.
+
+use std::io::{Read, Write};
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use mongoose::client::Device;
+use mongoose::Transport;
+
+/// Tabela de módulos do L319 MY10 (sigla, id de requisição, id de resposta).
+/// Extraída do PLATFORM do SDD. HS-CAN direto; MS-CAN via gateway.
+const MODULES: &[(&str, u16, u16)] = &[
+    ("IPC", 0x720, 0x728),
+    ("VIM", 0x722, 0x72A),
+    ("BCM", 0x726, 0x72E),
+    ("ACM", 0x727, 0x72F),
+    ("KVM", 0x731, 0x739),
+    ("HVAC", 0x733, 0x73B),
+    ("HCM", 0x734, 0x73C),
+    ("PAM", 0x736, 0x73E),
+    ("RCM", 0x737, 0x73F),
+    ("DDM", 0x740, 0x748),
+    ("PDM", 0x741, 0x749),
+    ("DSM", 0x744, 0x74C),
+    ("PBM", 0x756, 0x75E),
+    ("ABS", 0x760, 0x768),
+    ("TCCM", 0x761, 0x769),
+    ("CCM", 0x764, 0x76C),
+    ("OCS", 0x765, 0x76D),
+    ("SPRM", 0x772, 0x77A),
+    ("ATCM", 0x792, 0x79A),
+    ("RDCM", 0x795, 0x79D),
+    ("SASM", 0x797, 0x79F),
+    ("FCIMB", 0x7A0, 0x7A8),
+    ("FCDIM", 0x7A5, 0x7AD),
+    ("FCIM", 0x7A7, 0x7AF),
+    ("IPMB", 0x7B1, 0x7B9),
+    ("HCMB", 0x7C3, 0x7CB),
+    ("RLM", 0x7D3, 0x7DB),
+    ("PCM", 0x7E0, 0x7E8),
+    ("TCM", 0x7E1, 0x7E9),
+    ("AHCM", 0x7E3, 0x7EB),
+];
+
+struct SerialTransport {
+    port: Box<dyn serialport::SerialPort>,
+}
+
+impl SerialTransport {
+    fn open(name: &str, baud: u32) -> Result<Self> {
+        let mut port = serialport::new(name, baud)
+            .timeout(Duration::from_millis(60))
+            .open()
+            .with_context(|| format!("abrir {name}"))?;
+        let _ = port.write_data_terminal_ready(true);
+        let _ = port.write_request_to_send(true);
+        Ok(Self { port })
+    }
+}
+
+impl Transport for SerialTransport {
+    type Error = std::io::Error;
+    fn write_all(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        self.port.write_all(data)?;
+        self.port.flush()
+    }
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        match self.port.read(buf) {
+            Ok(n) => Ok(n),
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(0),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[derive(Parser)]
+#[command(
+    name = "car-scan",
+    about = "Leitura do veículo via Mongoose (somente leitura)"
+)]
+struct Cli {
+    /// Porta serial do Mongoose (ex.: COM5).
+    #[arg(long)]
+    port: String,
+    /// Taxa do HS-CAN (padrão 500000).
+    #[arg(long, default_value_t = 500_000)]
+    baud: u32,
+    #[command(subcommand)]
+    cmd: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Lê o VIN do módulo de powertrain (0x7E0).
+    Vin,
+    /// Varre quais módulos respondem (TesterPresent).
+    Scan,
+    /// Lê os DTCs de todos os módulos que respondem.
+    Dtcs,
+    /// VIN + varredura + DTCs, em sequência.
+    All,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    println!("Abrindo {} @ {} baud...", cli.port, cli.baud);
+    let transport = SerialTransport::open(&cli.port, cli.baud)?;
+    let mut dev = Device::new(transport);
+    dev.timeout = Duration::from_millis(2500);
+
+    let info = dev
+        .open()
+        .map_err(|e| anyhow::anyhow!("abrir dispositivo: {e:?}"))?;
+    println!("Adaptador OK (status {:#010x}).", info.status);
+    dev.connect_iso_tp(cli.baud)
+        .map_err(|e| anyhow::anyhow!("conectar ISO-TP: {e:?}"))?;
+    println!("Canal ISO15765 aberto, pinos 6/14.\n");
+
+    match cli.cmd {
+        Command::Vin => {
+            read_vin(&mut dev)?;
+        }
+        Command::Scan => {
+            scan(&mut dev)?;
+        }
+        Command::Dtcs => {
+            let present = scan(&mut dev)?;
+            read_all_dtcs(&mut dev, &present)?;
+        }
+        Command::All => {
+            read_vin(&mut dev)?;
+            println!();
+            let present = scan(&mut dev)?;
+            println!();
+            read_all_dtcs(&mut dev, &present)?;
+        }
+    }
+    Ok(())
+}
+
+fn read_vin<T: Transport>(dev: &mut Device<T>) -> Result<()> {
+    dev.add_flow_control_filter(0x7E8, 0x7E0)
+        .map_err(|e| anyhow::anyhow!("filtro VIN: {e:?}"))?;
+    let resp = dev
+        .request_iso_tp(0x7E0, &[0x22, 0xF1, 0x90], Duration::from_millis(900))
+        .map_err(|e| anyhow::anyhow!("pedir VIN: {e:?}"))?;
+    for r in &resp {
+        // Resposta positiva: 62 F1 90 + 17 bytes ASCII.
+        if r.service.len() >= 3
+            && r.service[0] == 0x62
+            && r.service[1] == 0xF1
+            && r.service[2] == 0x90
+        {
+            let vin: String = r.service[3..]
+                .iter()
+                .map(|&b| b as char)
+                .filter(|c| c.is_ascii_graphic())
+                .collect();
+            println!("VIN: {vin}");
+            return Ok(());
+        }
+    }
+    println!("VIN: sem resposta válida (respostas: {})", resp.len());
+    for r in &resp {
+        println!("  de {:#05X}: {}", r.can_id, hexdump(&r.service));
+    }
+    Ok(())
+}
+
+fn scan<T: Transport>(dev: &mut Device<T>) -> Result<Vec<(&'static str, u16, u16)>> {
+    println!("Varredura de módulos (TesterPresent):");
+    // Adiciona um filtro de controle de fluxo por módulo (uma vez).
+    for &(_, req, resp) in MODULES {
+        let _ = dev.add_flow_control_filter(resp, req);
+    }
+    let mut present = Vec::new();
+    for &(name, req, resp) in MODULES {
+        let answers = dev
+            .request_iso_tp(req, &[0x3E, 0x00], Duration::from_millis(220))
+            .unwrap_or_default();
+        let ok = answers.iter().any(|r| {
+            r.can_id == resp as u32 && r.service.first().is_some_and(|&b| b == 0x7E || b == 0x7F)
+        });
+        if ok {
+            println!("  [x] {name:<6} req {req:#05X} resp {resp:#05X}");
+            present.push((name, req, resp));
+        }
+    }
+    println!("{} módulos responderam.", present.len());
+    Ok(present)
+}
+
+fn read_all_dtcs<T: Transport>(
+    dev: &mut Device<T>,
+    present: &[(&'static str, u16, u16)],
+) -> Result<()> {
+    println!("\nDTCs por módulo:");
+    let mut total = 0;
+    for &(name, req, resp) in present {
+        // 0x19 0x02 0xFF: ReadDTCInformation / reportDTCByStatusMask / todos.
+        let answers = dev
+            .request_iso_tp(req, &[0x19, 0x02, 0xFF], Duration::from_millis(700))
+            .unwrap_or_default();
+        let Some(r) = answers
+            .iter()
+            .find(|r| r.can_id == resp as u32 && r.service.first() == Some(&0x59))
+        else {
+            continue;
+        };
+        let dtcs = decode_dtcs(&r.service);
+        if dtcs.is_empty() {
+            println!("  {name:<6}: sem DTCs");
+        } else {
+            total += dtcs.len();
+            println!("  {name:<6}: {} DTC(s)", dtcs.len());
+            for (code, status) in dtcs {
+                println!("      {code}  (status {status:#04X})");
+            }
+        }
+    }
+    println!("\nTotal: {total} DTC(s).");
+    Ok(())
+}
+
+/// Decodifica a resposta 0x59 0x02 <mask> [3 bytes DTC + 1 status]*.
+fn decode_dtcs(service: &[u8]) -> Vec<(String, u8)> {
+    let mut out = Vec::new();
+    if service.len() < 3 || service[0] != 0x59 || service[1] != 0x02 {
+        return out;
+    }
+    let mut i = 3; // pula 59 02 <availabilityMask>
+    while i + 4 <= service.len() {
+        let b0 = service[i];
+        let b1 = service[i + 1];
+        let b2 = service[i + 2];
+        let status = service[i + 3];
+        out.push((dtc_code(b0, b1, b2), status));
+        i += 4;
+    }
+    out
+}
+
+/// Converte 3 bytes em código DTC padrão (ex.: P0238, C1A77, U0401).
+fn dtc_code(b0: u8, b1: u8, b2: u8) -> String {
+    let letter = match b0 >> 6 {
+        0 => 'P',
+        1 => 'C',
+        2 => 'B',
+        _ => 'U',
+    };
+    let d1 = (b0 >> 4) & 0x3;
+    let d2 = b0 & 0x0F;
+    format!("{letter}{d1}{d2:X}{b1:02X}{b2:02X}")
+}
+
+fn hexdump(b: &[u8]) -> String {
+    b.iter()
+        .map(|x| format!("{x:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}

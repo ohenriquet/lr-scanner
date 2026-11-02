@@ -49,27 +49,47 @@ pub enum FrameError {
     BodyTooSmall(usize),
 }
 
+/// Campo `chan` (corpo+8) para comandos de gerência de canal (abrir canal,
+/// pino, filtros).
+pub const CHAN_MGMT: u16 = 0;
+
+/// Campo `chan` para comandos de dados (cOutboundData/cInboundData): o
+/// fornecedor envia cada mensagem como uma transação própria com `chan=1`.
+pub const CHAN_DATA: u16 = 1;
+
 /// Um corpo de mensagem já decomposto.
+///
+/// Layout do cabeçalho de 12 bytes (tudo little-endian): dest `0..2`,
+/// source `2..4`, opcode `4..6`, seq `6..8`, chan `8..10`, reservado
+/// `10..12`. Dados após o byte 12.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
     pub dest: u16,
     pub source: u16,
     pub opcode: u16,
     pub seq: u16,
+    /// Campo `chan` (corpo+8): [`CHAN_MGMT`] ou [`CHAN_DATA`].
+    pub chan: u16,
     /// Dados após o cabeçalho de 12 bytes.
     pub data: Vec<u8>,
 }
 
 impl Message {
-    /// Cria uma requisição do PC (origem 0, bytes 8..12 zerados).
-    pub fn request(dest: u16, opcode: u16, seq: u16, data: Vec<u8>) -> Self {
+    /// Cria uma requisição do PC (origem 0) com um `chan` explícito.
+    pub fn request_chan(dest: u16, opcode: u16, seq: u16, chan: u16, data: Vec<u8>) -> Self {
         Self {
             dest,
             source: NODE_PC,
             opcode,
             seq,
+            chan,
             data,
         }
+    }
+
+    /// Requisição de gerência de canal (`chan=0`).
+    pub fn request(dest: u16, opcode: u16, seq: u16, data: Vec<u8>) -> Self {
+        Self::request_chan(dest, opcode, seq, CHAN_MGMT, data)
     }
 
     /// Serializa o corpo (cabeçalho de 12 bytes + dados).
@@ -79,7 +99,8 @@ impl Message {
         b.extend_from_slice(&self.source.to_le_bytes());
         b.extend_from_slice(&self.opcode.to_le_bytes());
         b.extend_from_slice(&self.seq.to_le_bytes());
-        b.extend_from_slice(&[0u8; 4]); // reservado
+        b.extend_from_slice(&self.chan.to_le_bytes());
+        b.extend_from_slice(&[0u8; 2]); // reservado (corpo+10)
         b.extend_from_slice(&self.data);
         b
     }
@@ -100,6 +121,7 @@ impl Message {
             source: u16::from_le_bytes([body[2], body[3]]),
             opcode: u16::from_le_bytes([body[4], body[5]]),
             seq: u16::from_le_bytes([body[6], body[7]]),
+            chan: u16::from_le_bytes([body[8], body[9]]),
             data: body[HEADER_LEN..].to_vec(),
         })
     }

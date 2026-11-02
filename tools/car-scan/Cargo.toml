@@ -1,0 +1,16 @@
+[package]
+name = "car-scan"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "Leitura de VIN, módulos e DTCs do veículo via Mongoose (somente leitura)."
+
+[[bin]]
+name = "car-scan"
+path = "src/main.rs"
+
+[dependencies]
+mongoose = { path = "../../crates/mongoose" }
+serialport = "4.7.0"
+clap = { workspace = true }
+anyhow = { workspace = true }

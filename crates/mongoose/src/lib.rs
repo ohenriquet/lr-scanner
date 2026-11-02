@@ -10,8 +10,10 @@
 //! especificação. A camada de transporte e os comandos de alto nível serão
 //! validados em bancada com o adaptador físico (Fase 3).
 
+pub mod can;
 pub mod client;
 pub mod frame;
+pub mod isotp;
 pub mod opcode;
 
 /// Transporte físico de bytes para o adaptador.
