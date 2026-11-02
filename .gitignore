@@ -26,3 +26,8 @@ app/android/app/.cxx/
 *.jsonl
 # Toolchains e temporários
 /.env.local
+
+# Material de segurança / decompilação proprietária: nunca versionar
+keymat*.json
+*_decompiled*
+SecAlg*.c*
