@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Carrega o ambiente de desenvolvimento do projeto (toolchains portáteis em C:\dev).
+export CARGO_HOME="$USERPROFILE/.cargo"
+export RUSTUP_HOME="$USERPROFILE/.rustup"
+export JAVA_HOME="/c/dev/jdk/jdk-21.0.13+9"
+export FLUTTER_ROOT="/c/dev/flutter"
+export GHIDRA_HOME="/c/dev/ghidra/ghidra_12.2_PUBLIC"
+export PATH="$CARGO_HOME/bin:/c/dev/mingw64/bin:$FLUTTER_ROOT/bin:$JAVA_HOME/bin:$PATH"

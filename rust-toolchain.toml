@@ -1,0 +1,7 @@
+# Fixa a toolchain GNU (mingw-w64 portátil em C:\dev\mingw64), evitando a
+# dependência do MSVC/Visual Studio. Troca p/ MSVC no futuro: instalar o
+# workload C++ do VS Build Tools e mudar channel p/ stable-x86_64-pc-windows-msvc.
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
+components = ["rustfmt", "clippy", "rust-analyzer"]
+targets = ["i686-pc-windows-gnu"]

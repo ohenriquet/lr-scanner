@@ -1,0 +1,10 @@
+# Projeto usa a toolchain GNU do Rust com mingw-w64 portátil (C:/dev/mingw64),
+# para não depender do MSVC/Visual Studio (que exige elevação para instalar).
+# Para trocar p/ MSVC depois: instalar o workload C++ do VS Build Tools e
+# rodar `rustup default stable-x86_64-pc-windows-msvc` (e remover este arquivo).
+[target.x86_64-pc-windows-gnu]
+linker = "C:/dev/mingw64/bin/gcc.exe"
+ar = "C:/dev/mingw64/bin/ar.exe"
+
+[target.i686-pc-windows-gnu]
+linker = "C:/dev/mingw64/bin/gcc.exe"

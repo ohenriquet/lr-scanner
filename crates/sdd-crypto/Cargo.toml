@@ -1,0 +1,11 @@
+[package]
+name = "sdd-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Codec dos arquivos .exml do JLR SDD (3DES-ECB)."
+
+[dependencies]
+des = { workspace = true }
+cipher = { workspace = true }
+thiserror = { workspace = true }
