@@ -102,3 +102,52 @@ e copiar a sequência exata (formato, endereço, tamanho do bloco, checksum).
 Já está validado e pronto: todo o encadeamento de sessão e segurança
 (diagnóstico E programação) no módulo real, e o ISO-TP de software para
 enviar/receber qualquer tamanho dentro do buffer de 128 bytes do BCM.
+
+## Sequência de flash do CCF — CONFIRMADA por RE (offline)
+
+Decompilei (Ghidra 12.2 headless) as DLLs do próprio SDD que gravam o CCF:
+`SessionCcf.dll` (orquestrador), `VISO14229.dll` (canal UDS ISO-14229),
+`SWDL.dll`/`SWDLInterface.dll` (motor de software download) e `LegacyFlash.dll`
+(descartada — é o reflash antigo de powertrain Denso/Jatco/ZF/Puma, J2190, não
+toca no CCF). Artefatos no scratchpad: `decomp_sessionccf.txt`,
+`decomp_viso14229.txt`.
+
+**Descoberta central — a precondição que faltava.** O erase `31 01 FF00` só é
+aceito depois de ARMAR o módulo com uma rotina de "Programming Enable". Em
+`CSessionCcf::InitiateProgrammingEnableMode` (log: "Enabling SWDL Mode"):
+
+```
+V14229_SetDiagnosticSession(0x03)   → 10 03   (sessão ESTENDIDA, não 10 02)
+ObtainDiagSecurityConstant(0x23) + V14229_SecureAccess → 27  (segurança DIAG)
+V14229_PerformRoutine(routineId=0x800E, controlType=1) → 31 01 80 0E   ★
+V14229_Disconnect
+```
+
+Isso é chamado dentro de `CSessionCcf::InitiateBlockWriteSWDLProcess`, **só
+quando `SWDL_GetProgrammingEnableFlag()==1`** (flag por módulo; no BCM está
+ligado), e **antes** de `SWDL_StartJob()` — que é quem entra na sessão de
+programação e faz erase/0x34/0x36/0x37. Ou seja, nosso `7F 31 22`
+(conditionsNotCorrect) no erase era exatamente a ausência do `31 01 800E`.
+
+O canal UDS do SDD (`CISO14229Channel`) implementa 10, 11, 19, 27, 31, 34, 36,
+37, 85 — e **NÃO** implementa CommunicationControl (0x28). Logo o preâmbulo não
+usa 0x28 (hipótese anterior descartada).
+
+**Sequência completa de gravação (implementada em `ccf-flash`):**
+1. `10 03` + `27` diag (DC0164) — sessão estendida + segurança diagnóstica.
+2. `31 01 80 0E` (startRoutine, Programming Enable / Enabling SWDL Mode). ★
+3. `10 02` + `27` prog (DC0163) — sessão de programação.
+4. `31 01 FF00 <addr 0xFFAC00> <len 0x400>` — erase.
+5. `34 00 44 <addr> <len 698>` — RequestDownload.
+6. `36 <seq> <dados>` em pedaços ≤ maxBlockLength − 2.
+7. `37` — RequestTransferExit.
+8. `11 01` — ECUReset; religa DTC/comunicação; reler `0xDE00` e conferir.
+
+**Única incerteza residual:** a RE mostra a segurança do passo 2 vindo de
+`ObtainDiagSecurityConstantFromAccessLevel(0x23)`; os níveis do grupo 168 do BCM
+são 0x03/0x11/0x21 (0x23 não bate). Pode ser um "access level" interno do SDD
+que mapeia para a constante diag padrão (DC0164, a que já usamos e que abre a
+diag), ou exigir DC0165. O comando `ccf-flash` em modo PROBE (sem `--write`)
+roda 1→3 e já mostra a resposta do `31 01 800E`: `71` = armado; `7F 31 33` =
+nível de segurança diferente (tentar DC0165 antes do 800E); `7F 31 xx` = outro.
+Isso é não-destrutivo (não apaga nada), então é o primeiro teste no carro.

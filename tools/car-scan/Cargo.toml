@@ -12,7 +12,10 @@ path = "src/main.rs"
 [dependencies]
 mongoose = { path = "../../crates/mongoose" }
 jlr-security = { path = "../../crates/jlr-security" }
+diag = { path = "../../crates/diag" }
 serialport = "4.7.0"
 clap = { workspace = true }
 anyhow = { workspace = true }
 rusqlite = { workspace = true }
+serde_json = { workspace = true }
+tiny_http = "0.12.0"

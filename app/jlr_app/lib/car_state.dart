@@ -181,6 +181,18 @@ class CarState extends ChangeNotifier {
   bool isWatched(String module, LiveParam p) =>
       _watched.containsKey('$module|${p.did}');
 
+  /// Observa um sinal pelo (módulo, DID) — usado pelo auto-connect.
+  void watchByDid(String module, String did) {
+    final params = pack.live[module];
+    if (params == null) return;
+    for (final p in params) {
+      if (p.did == did && !isWatched(module, p)) {
+        toggleWatch(module, p);
+        return;
+      }
+    }
+  }
+
   void toggleWatch(String module, LiveParam p) {
     final key = '$module|${p.did}';
     if (_watched.remove(key) != null) {

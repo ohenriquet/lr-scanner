@@ -201,9 +201,10 @@ impl<T: Transport<Error: 'static>> CarSession<T> {
         let _ = self.dev.add_flow_control_filter(resp, req);
         let hi = (did >> 8) as u8;
         let lo = (did & 0xff) as u8;
+        // 2500 ms acomoda DIDs grandes (ex.: o CCF 0xDE00, 1024 bytes).
         let answers = self
             .dev
-            .request_iso_tp(req, &[0x22, hi, lo], Duration::from_millis(900))
+            .request_iso_tp(req, &[0x22, hi, lo], Duration::from_millis(2500))
             .ok()?;
         for r in &answers {
             if r.can_id == resp as u32

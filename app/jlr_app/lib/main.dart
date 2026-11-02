@@ -61,6 +61,7 @@ class _HomeShellState extends State<HomeShell> {
   // Deep-link opcional por URL: ?tab=0|1|2, ?q=<busca> e ?demo=1 (pré-visualização).
   String? _initialQuery;
   bool _demo = false;
+  int _auto = 0; // 0=nada, 1=conecta+observa, 2=conecta sem observar
 
   @override
   void initState() {
@@ -70,6 +71,7 @@ class _HomeShellState extends State<HomeShell> {
     if (t != null && t >= 0 && t <= 3) _tab = t;
     _initialQuery = q['q'];
     _demo = q['demo'] == '1';
+    _auto = int.tryParse(q['auto'] ?? '0') ?? 0;
   }
 
   static const _dests = [
@@ -106,6 +108,23 @@ class _HomeShellState extends State<HomeShell> {
         if (_demo && !car.demo && !car.connected) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) car.loadDemo();
+          });
+        }
+        if (_auto > 0 && !car.connected && !car.connecting) {
+          final watch = _auto == 1; // auto=2 conecta sem observar (poll parado)
+          _auto = 0; // dispara uma vez
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!mounted) return;
+            await car.connect('COM5', 500000);
+            if (!mounted || !watch) return;
+            for (final w in const [
+              ('PCM', '0x0504'), // fluxo de ar
+              ('PCM', '0x0301'), // pressão coletor (tensão)
+              ('RLM', '0x3B03'), // altura diant. esq.
+              ('RLM', '0x3B04'), // altura diant. dir.
+            ]) {
+              car.watchByDid(w.$1, w.$2);
+            }
           });
         }
         final pages = [

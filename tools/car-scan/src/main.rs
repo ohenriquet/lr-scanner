@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod ccf_checksum;
+mod serve;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -235,11 +236,33 @@ enum Command {
         /// Confirmação obrigatória quando --write.
         #[arg(long)]
         yes: bool,
+        /// NÃO roda a rotina de "Programming Enable" (31 01 800E) na sessão
+        /// estendida antes de entrar na sessão de programação. Por padrão ela É
+        /// executada — é a precondição que o SDD usa (RE do SessionCcf.dll) e
+        /// sem ela o erase do BCM responde 7F 31 22 (conditionsNotCorrect).
+        #[arg(long)]
+        no_preamble: bool,
+    },
+    /// Sobe um servidor local que serve o app Flutter (web) e expõe a leitura
+    /// do carro por HTTP — pra testar a interface com dados reais no navegador.
+    Serve {
+        /// Pasta do build web do app (ex.: app/jlr_app/build/web).
+        #[arg(long)]
+        web: String,
+        /// Porta HTTP local.
+        #[arg(long, default_value_t = 8080)]
+        http: u16,
     },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Serve abre a própria sessão (crate diag); não usa o `dev` global.
+    if let Command::Serve { web, http } = &cli.cmd {
+        return serve::run(&cli.port, cli.baud, web, *http);
+    }
+
     println!("Abrindo {} @ {} baud...", cli.port, cli.baud);
     let transport = SerialTransport::open(&cli.port, cli.baud)?;
     let mut dev = Device::new(transport);
@@ -346,6 +369,7 @@ fn main() -> Result<()> {
             start_routine,
             write,
             yes,
+            no_preamble,
         } => {
             let parse_u16 = |s: &str| -> Result<u16> {
                 u16::from_str_radix(s.trim_start_matches("0x"), 16)
@@ -372,8 +396,10 @@ fn main() -> Result<()> {
                 start,
                 write,
                 yes,
+                !no_preamble,
             )?;
         }
+        Command::Serve { .. } => unreachable!("Serve é tratado antes de abrir a porta"),
     }
     Ok(())
 }
@@ -617,10 +643,14 @@ fn ccf_flash<T: Transport<Error: 'static>>(
     start_routine: Option<u16>,
     write: bool,
     yes: bool,
+    preamble: bool,
 ) -> Result<()> {
     const ADDR: u32 = 0x00FF_AC00;
     const ERASE_LEN: u32 = 0x0400; // 1024
     const CFG_LEN: usize = 698;
+    // Rotina de "Programming Enable / Enabling SWDL Mode" que arma o BCM para o
+    // erase. Descoberta por RE de SessionCcf.dll (InitiateProgrammingEnableMode).
+    const PROG_ENABLE_ROUTINE: u16 = 0x800E;
 
     // 1) Lê o CCF atual (baseline + backup).
     let current = read_ccf_sw(dev)?;
@@ -653,11 +683,44 @@ fn ccf_flash<T: Transport<Error: 'static>>(
         }
     }
 
-    // 3) Desbloqueio (diagnóstico + programação).
+    // 3) Desbloqueio diagnóstico (10 03 + segurança diagnóstica DC0164).
     anyhow::ensure!(
         unlock_bcm_sw(dev, diag_const)?,
         "não desbloqueou a sessão diagnóstica"
     );
+
+    // 3b) PROGRAMMING ENABLE — a precondição do erase, confirmada por RE do
+    // SessionCcf.dll (CSessionCcf::InitiateProgrammingEnableMode). Ainda na
+    // sessão ESTENDIDA (10 03) e com a segurança diagnóstica já aberta, o SDD
+    // roda RoutineControl 31 01 800E (startRoutine, routineId 0x800E = "Enabling
+    // SWDL Mode"). É o que arma o BCM para aceitar o erase quando se entra na
+    // sessão de programação; sem isto o erase responde 7F 31 22
+    // (conditionsNotCorrect), exatamente o que víamos. Só então entra em 10 02.
+    if preamble {
+        let req = vec![
+            0x31,
+            0x01,
+            (PROG_ENABLE_ROUTINE >> 8) as u8,
+            (PROG_ENABLE_ROUTINE & 0xff) as u8,
+        ];
+        println!(
+            "PROGRAMMING ENABLE (routineId {:#06X}): {}",
+            PROG_ENABLE_ROUTINE,
+            hexdump(&req)
+        );
+        let r = sw_uds(dev, &req, 5000)?;
+        println!(
+            "  resposta: {}{}",
+            hexdump(&r),
+            if r.first() == Some(&0x71) {
+                "  [OK — SWDL armado]"
+            } else {
+                "  [ver resposta; se 7F 31 xx o erase deve falhar]"
+            }
+        );
+    }
+
+    // 3c) Desbloqueio de programação (10 02 + segurança de programação DC0163).
     anyhow::ensure!(
         prog_unlock_bcm_sw(dev, prog_const)?,
         "não desbloqueou a segurança de programação"
@@ -700,11 +763,12 @@ fn ccf_flash<T: Transport<Error: 'static>>(
     println!("ERASE: {}", hexdump(&erase));
     let r = sw_uds(dev, &erase, 15000)?;
     println!("  resposta erase: {}", hexdump(&r));
-    anyhow::ensure!(
-        r.first() == Some(&0x71),
-        "erase NEGADO ({}); nada foi apagado — abortando",
-        hexdump(&r)
-    );
+    if r.first() != Some(&0x71) {
+        // Restaura a sessão padrão (reabilita DTC/comunicação desligados no
+        // preâmbulo) antes de abortar. Nada foi apagado.
+        let _ = sw_uds(dev, &[0x10, 0x01], 1000);
+        anyhow::bail!("erase NEGADO ({}); nada foi apagado — abortando", hexdump(&r));
+    }
     println!(">>> Região apagada. É preciso completar a gravação agora.");
 
     // 6) RequestDownload.
