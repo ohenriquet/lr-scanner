@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/sdd-crypto",
   "crates/sdd-data",
+  "crates/mongoose",
   "tools/sdd-import",
 ]
 

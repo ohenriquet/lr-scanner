@@ -1,0 +1,5 @@
+Este crate (mongoose) deriva de engenharia reversa publicada sob
+GNU LGPL v2.1-or-later no projeto:
+  github.com/dgcarr/Mongoose-USB-2-OBDII-Linux-Driver
+e por isso é distribuído sob os mesmos termos (LGPL-2.1-or-later).
+O texto completo da licença acompanha aquele projeto.

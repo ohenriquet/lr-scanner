@@ -1,0 +1,9 @@
+[package]
+name = "mongoose"
+version.workspace = true
+edition.workspace = true
+license = "LGPL-2.1-or-later"
+description = "Protocolo do adaptador Mongoose Pro JLR (J2534). Derivado de engenharia reversa LGPL (dgcarr/Mongoose-USB-2-OBDII-Linux-Driver)."
+
+[dependencies]
+thiserror = { workspace = true }
