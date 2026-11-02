@@ -221,13 +221,32 @@
 
   /* car illustration */
   .carcard { padding: 14px 16px; display: grid; gap: 12px; }
-  .carstage { position: relative; display: grid; place-items: center; padding: 6px 0; }
+  .carstage {
+    position: relative; display: grid; place-items: center;
+    background: radial-gradient(135% 95% at 50% 32%, #ffffff 0%, #eef1f4 52%, #dfe4ea 100%);
+    border: 1px solid var(--line); border-radius: 16px; padding: 14px 10px 8px;
+    box-shadow: inset 0 1px 0 #fff, 0 1px 2px #0006;
+  }
+  .carstage img { width: 100%; max-width: 440px; height: auto; display: block;
+    filter: drop-shadow(0 10px 14px rgba(0,0,0,.28)); }
   .carstage svg { width: 100%; max-width: 460px; height: auto; }
   .carcolors { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
   .colorchip { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; position: relative; }
   .colorchip[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  .colorchip.mine::after { content: "★"; position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 13px; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
   .colorname { font-size: 12px; color: var(--ink-2); font-family: var(--mono); }
-  .carfloor { width: 70%; height: 10px; margin: -6px auto 0; border-radius: 50%; background: radial-gradient(ellipse at center, #0007, transparent 70%); }
+  .bodytoggle { display: flex; gap: 6px; }
+  .bodytoggle button {
+    flex: 1; appearance: none; cursor: pointer; text-align: left;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 8px 11px; color: var(--ink-2); font-family: var(--sans); line-height: 1.25;
+    display: flex; flex-direction: column; gap: 1px; transition: all .12s;
+  }
+  .bodytoggle button b { font-size: 13px; color: var(--ink); }
+  .bodytoggle button span { font-size: 10.5px; color: var(--ink-3); font-family: var(--mono); }
+  .bodytoggle button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-dim); }
+  .bodytoggle button[aria-pressed="true"] b { color: var(--accent); }
 
   /* tablet / desktop */
   @media (min-width: 820px) {
@@ -313,10 +332,10 @@
               <span class="colorname" id="colorName">Indus Silver</span>
             </div>
             <div class="carstage" id="carStage"></div>
-            <div class="carfloor"></div>
+            <div class="bodytoggle" id="bodyToggle"></div>
             <div class="carcolors" id="carColors"></div>
             <div style="font-size:11.5px;color:var(--ink-3)">
-              A cor vem do registro de fabricação (Topix) pelo VIN, não do VIN em si. Escolha a sua para deixar fiel.
+              O VIN não traz a cor. A sua é <b>Sumatra Black</b> — como não há render dessa tinta, usamos o preto equivalente (Santorini Black). Clique no carro (ou num círculo) para trocar; alterne a carroceria se o seu carro tiver o facelift.
             </div>
           </div>
 
@@ -847,66 +866,79 @@
     bx.appendChild(b); ov.appendChild(bx); ov.onclick=function(e){ if(e.target===ov) ov.remove(); }; document.body.appendChild(ov);
   }
 
-  /* ---------------- Car illustration + colour ---------------- */
-  var COLORS = [
-    ["Fuji White","#e9ebe9","#b9bcbb"], ["Indus Silver","#9ba1a5","#767c80"],
-    ["Corris Grey","#5a5f63","#44484b"], ["Santorini Black","#1b1e21","#0e1012"],
-    ["Loire Blue","#2d4a6b","#1d3350"], ["Baltic Blue","#3a6c9e","#285074"],
-    ["Firenze Red","#7c1a22","#5a0f16"], ["Kaikoura Stone","#b7b0a1","#938c7e"],
-    ["Nara Bronze","#5f5240","#443a2c"]
-  ];
-  function carSVG(){
-    return '<svg viewBox="0 0 470 196" xmlns="http://www.w3.org/2000/svg" aria-label="Land Rover Discovery 4">'
-      // shadow under body
-      + '<ellipse cx="235" cy="176" rx="200" ry="9" fill="#0003"/>'
-      // body (tintable)
-      + '<path fill="var(--carcol)" stroke="#0004" stroke-width="1.5" stroke-linejoin="round" d="'
-        + 'M22 150 L22 112 Q22 104 31 101 L96 90 L120 58 Q124 50 134 49 L300 47 L314 33 Q318 29 326 29 '
-        + 'L430 30 Q442 31 444 44 L450 112 L452 132 Q452 150 436 150 L402 150 '
-        + 'A38 38 0 0 0 326 150 L170 150 A38 38 0 0 0 94 150 L40 150 Q22 150 22 150 Z"/>'
-      // roof highlight
-      + '<path fill="#fff" opacity=".10" d="M135 51 L300 49 L313 36 L428 37 L430 44 L314 43 L302 55 L137 57 Z"/>'
-      // windows
-      + '<path fill="#1b2730" stroke="#0005" d="M131 58 L154 61 L153 86 L116 88 Z"/>'          // windscreen
-      + '<path fill="#223039" stroke="#0005" d="M160 61 L214 60 L214 86 L160 86 Z"/>'            // front door
-      + '<path fill="#223039" stroke="#0005" d="M220 60 L286 59 L286 86 L220 86 Z"/>'            // rear door
-      + '<path fill="#1b2730" stroke="#0005" d="M292 59 L320 50 L336 51 L336 86 L292 86 Z"/>'    // quarter + stadium step
-      + '<rect x="214.5" y="60" width="5" height="26" fill="var(--carcol)"/>'                      // B-pillar
-      // belt line + door handles
-      + '<path stroke="#0003" stroke-width="2" d="M118 92 L300 90"/>'
-      + '<rect x="182" y="96" width="16" height="4" rx="2" fill="#0004"/>'
-      + '<rect x="250" y="96" width="16" height="4" rx="2" fill="#0004"/>'
-      + '<path stroke="#0003" stroke-width="1.5" d="M216 60 L216 150 M158 88 L158 150 M290 88 L290 150"/>' // door cuts
-      // sill
-      + '<rect x="40" y="138" width="390" height="8" rx="3" fill="#0003"/>'
-      // lights
-      + '<rect x="24" y="104" width="12" height="16" rx="3" fill="#e9eef2" opacity=".85"/>'        // headlight
-      + '<rect x="438" y="104" width="10" height="20" rx="3" fill="#e0574e"/>'                     // taillight
-      // wheels
-      + wheel(132,150) + wheel(364,150)
-      + '</svg>';
-  }
-  function wheel(cx,cy){
-    return '<g>'
-      + '<circle cx="'+cx+'" cy="'+cy+'" r="38" fill="#15181b"/>'
-      + '<circle cx="'+cx+'" cy="'+cy+'" r="37" fill="none" stroke="#000" stroke-width="2"/>'
-      + '<circle cx="'+cx+'" cy="'+cy+'" r="19" fill="#c4cace"/>'
-      + '<circle cx="'+cx+'" cy="'+cy+'" r="19" fill="none" stroke="#888" stroke-width="1"/>'
-      + '<circle cx="'+cx+'" cy="'+cy+'" r="5" fill="#2a2e31"/>'
-      + spokes(cx,cy) + '</g>';
-  }
-  function spokes(cx,cy){ var s=""; for(var i=0;i<5;i++){ var a=i/5*Math.PI*2; s+='<line x1="'+(cx+Math.cos(a)*6)+'" y1="'+(cy+Math.sin(a)*6)+'" x2="'+(cx+Math.cos(a)*18)+'" y2="'+(cy+Math.sin(a)*18)+'" stroke="#9aa0a4" stroke-width="3"/>'; } return s; }
-  var carStage=$("#carStage"), carColors=$("#carColors"), colorName=$("#colorName");
-  var CARIDX=1;
+  /* ---------------- Car render + colour ---------------- */
+  /* Renders de estúdio por cor (Chrome/autobytel). Cada cor: [nome, hex real,
+     arquivo, sua?]. Duas carrocerias: pré-facelift (Discovery 4 2010-13, que é
+     o MY12 do usuário) e facelift (LR4 2014-16, para-choque/faróis diferentes). */
+  var BODIES = {
+    pre: { label:"Discovery 4", sub:"2010-13 · seu MY12", pref:"lr4_", colors:[
+      ["Sumatra Black","#17191c","santorini_black",true],
+      ["Santorini Black","#090909","santorini_black"],
+      ["Stornaway Grey","#5f5f5f","stornaway_grey"],
+      ["Zermatt Silver","#aaabad","zermatt_silver"],
+      ["Alaska White","#f3eee9","alaska_white"],
+      ["Ipanema Sand","#b7b3ae","ipanema_sand"],
+      ["Nara Bronze","#806d5f","nara_bronze"],
+      ["Bournville","#423338","bournville"],
+      ["Buckingham Blue","#323d51","buckingham_blue"],
+      ["Izmir Blue","#7e899d","izmir_blue"],
+      ["Bali Blue","#4f446c","bali_blue"],
+      ["Lugano Teal","#2f7086","lugano_teal"],
+      ["Galway Green","#6d7b6a","galway_green"],
+      ["Keswick Green","#6c7a6d","keswick_green"],
+      ["Rimini Red","#810021","rimini_red"]
+    ]},
+    face: { label:"LR4 facelift", sub:"2014-16", pref:"fl_", colors:[
+      ["Santorini Black","#191a1c","santorini_black"],
+      ["Barolo Black","#1a1615","barolo_black"],
+      ["Mariana Black","#1b1d1c","mariana_black"],
+      ["Corris Grey","#5c5f5d","corris_grey"],
+      ["Scotia Grey","#595f5a","scotia_grey"],
+      ["Indus Silver","#bcbebe","indus_silver"],
+      ["Yulong White","#cdcfd0","yulong_white"],
+      ["Fuji White","#e3e8e2","fuji_white"],
+      ["Aruba","#847f7c","aruba"],
+      ["Zanzibar","#735135","zanzibar"],
+      ["Loire Blue","#142030","loire_blue"],
+      ["Aintree Green","#122923","aintree_green"],
+      ["Firenze Red","#6f0c19","firenze_red"],
+      ["Montalcino Red","#58091c","montalcino_red"]
+    ]}
+  };
+  var carStage=$("#carStage"), carColors=$("#carColors"), colorName=$("#colorName"), bodyToggle=$("#bodyToggle");
+  var BODYKEY="pre", CARIDX=0;
+  function curColors(){ return BODIES[BODYKEY].colors; }
+  function saveCar(){ try{ localStorage.setItem("jlr_body",BODYKEY); localStorage.setItem("jlr_color",CARIDX); }catch(e){} }
   function paintCar(){
-    carStage.style.setProperty("--carcol", COLORS[CARIDX][1]);
-    carStage.innerHTML=carSVG();
-    colorName.textContent=COLORS[CARIDX][0];
+    var c=curColors()[CARIDX];
+    var img=new Image(); img.alt="Land Rover "+BODIES[BODYKEY].label+" "+c[0]; img.draggable=false;
+    img.src="assets/car/"+BODIES[BODYKEY].pref+c[2]+".jpg";
+    carStage.innerHTML=""; carStage.appendChild(img);
+    colorName.textContent=c[0]+(c[3]?" · sua cor":"");
     carColors.querySelectorAll("button").forEach(function(b,i){ b.setAttribute("aria-pressed", i===CARIDX?"true":"false"); });
   }
-  COLORS.forEach(function(c,i){ var b=document.createElement("button"); b.className="colorchip"; b.style.background=c[1];
-    b.title=c[0]; b.setAttribute("aria-label",c[0]); b.onclick=function(){ CARIDX=i; paintCar(); try{localStorage.setItem("jlr_color",i);}catch(e){} }; carColors.appendChild(b); });
-  try{ var sc=localStorage.getItem("jlr_color"); if(sc!=null) CARIDX=+sc; }catch(e){}
+  function renderChips(){
+    carColors.innerHTML="";
+    curColors().forEach(function(c,i){
+      var b=document.createElement("button"); b.className="colorchip"+(c[3]?" mine":""); b.style.background=c[1];
+      b.title=c[0]+(c[3]?" (sua cor)":""); b.setAttribute("aria-label",c[0]);
+      b.onclick=function(){ CARIDX=i; paintCar(); saveCar(); }; carColors.appendChild(b);
+    });
+  }
+  function setBody(key){ if(!BODIES[key]) return; BODYKEY=key; if(CARIDX>=curColors().length) CARIDX=0;
+    bodyToggle.querySelectorAll("button").forEach(function(b){ b.setAttribute("aria-pressed", b.dataset.k===key?"true":"false"); });
+    renderChips(); paintCar(); saveCar(); }
+  // alternador de carroceria
+  Object.keys(BODIES).forEach(function(k){ var b=document.createElement("button"); b.dataset.k=k;
+    b.innerHTML="<b>"+BODIES[k].label+"</b><span>"+BODIES[k].sub+"</span>"; b.onclick=function(){ setBody(k); }; bodyToggle.appendChild(b); });
+  // clicar na imagem cicla a cor (correção rápida de leitura errada / repintura)
+  carStage.title="Clique para trocar a cor";
+  carStage.onclick=function(){ CARIDX=(CARIDX+1)%curColors().length; paintCar(); saveCar(); };
+  // restaura escolha
+  try{ var sb=localStorage.getItem("jlr_body"); if(sb&&BODIES[sb]) BODYKEY=sb;
+       var sc=localStorage.getItem("jlr_color"); if(sc!=null) CARIDX=Math.min(+sc, curColors().length-1); }catch(e){}
+  bodyToggle.querySelectorAll("button").forEach(function(b){ b.setAttribute("aria-pressed", b.dataset.k===BODYKEY?"true":"false"); });
+  renderChips();
 
   /* ---------------- Testes: funções de serviço ---------------- */
   var SVCFN = [

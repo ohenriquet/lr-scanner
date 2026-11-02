@@ -35,3 +35,6 @@ SecAlg*.c*
 # shim compilado e capturas
 tools/j2534-shim/monpj_shim.dll
 captures/
+
+# Renders de carro (terceiros, Chrome Data): baixados por app/assets/car/fetch.sh
+app/assets/car/*.jpg
