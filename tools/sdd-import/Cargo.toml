@@ -1,0 +1,19 @@
+[package]
+name = "sdd-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI que importa a instalação do JLR SDD em pacotes SQLite."
+
+[[bin]]
+name = "sdd-import"
+path = "src/main.rs"
+
+[dependencies]
+sdd-data = { path = "../../crates/sdd-data" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rusqlite = { workspace = true }
+walkdir = { workspace = true }

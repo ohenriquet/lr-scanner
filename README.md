@@ -18,7 +18,7 @@ Em desenvolvimento inicial. Ver o plano em
 |---|---|---|
 | 0 | Ambiente + repositório | feito |
 | 1 | `sdd-crypto` (codec `.exml`) | feito |
-| 1 | `sdd-data` + `sdd-import` (parsers → SQLite) | em andamento |
+| 1 | `sdd-data` + `sdd-import` (parsers → SQLite) | feito |
 | 2 | `j2534` + shim gravador (Windows) | pendente |
 | 3 | `mongoose` (protocolo USB nativo) | pendente |
 | 4 | `diag` (UDS, leitura no carro) | pendente |

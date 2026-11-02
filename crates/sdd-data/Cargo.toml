@@ -1,0 +1,15 @@
+[package]
+name = "sdd-data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parsers dos dados do JLR SDD e geração de pacotes SQLite."
+
+[dependencies]
+sdd-crypto = { path = "../sdd-crypto" }
+quick-xml = { version = "0.38.4", features = ["serialize"] }
+serde = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { workspace = true }
+tracing = { workspace = true }
+walkdir = { workspace = true }

@@ -27,7 +27,10 @@ fn decifra_par_conhecido_jlr_vsv_config() {
     let enc = std::fs::read(dir.join("JLR_VSV_CONFIG.exml")).expect("ler .exml");
     let plano = std::fs::read(dir.join("JLR_VSV_CONFIG.xml")).expect("ler .xml");
     let dec = sdd_crypto::decrypt(&enc).expect("decifrar");
-    assert_eq!(dec, plano, "o texto decifrado deve bater byte a byte com o plano");
+    assert_eq!(
+        dec, plano,
+        "o texto decifrado deve bater byte a byte com o plano"
+    );
 }
 
 /// Arquivos-chave do L319 devem decifrar para XML bem-formado no início.
@@ -76,7 +79,10 @@ fn decifra_toda_a_raiz_sem_erro() {
         }
         match decifra_arquivo(&path) {
             Ok(()) => ok += 1,
-            Err(e) => falhas.push(format!("{}: {e}", path.file_name().unwrap().to_string_lossy())),
+            Err(e) => falhas.push(format!(
+                "{}: {e}",
+                path.file_name().unwrap().to_string_lossy()
+            )),
         }
     }
     assert!(ok > 0, "nenhum .exml encontrado na raiz");

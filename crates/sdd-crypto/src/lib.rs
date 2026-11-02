@@ -54,12 +54,12 @@ pub fn decrypt(ciphertext: &[u8]) -> Result<Vec<u8>, ExmlError> {
     if ciphertext.is_empty() {
         return Err(ExmlError::Empty);
     }
-    if ciphertext.len() % BLOCK != 0 {
+    if !ciphertext.len().is_multiple_of(BLOCK) {
         return Err(ExmlError::NotBlockAligned(ciphertext.len()));
     }
     let c = cipher();
     let mut out = ciphertext.to_vec();
-    for chunk in out.chunks_exact_mut(BLOCK) {
+    for chunk in out.as_chunks_mut::<BLOCK>().0 {
         c.decrypt_block(chunk.into());
     }
     strip_pkcs5(&mut out)?;
@@ -74,7 +74,7 @@ pub fn encrypt(plaintext: &[u8]) -> Vec<u8> {
     let mut out = plaintext.to_vec();
     pad_pkcs5(&mut out);
     let c = cipher();
-    for chunk in out.chunks_exact_mut(BLOCK) {
+    for chunk in out.as_chunks_mut::<BLOCK>().0 {
         c.encrypt_block(chunk.into());
     }
     out
@@ -100,7 +100,7 @@ fn strip_pkcs5(buf: &mut Vec<u8>) -> Result<(), ExmlError> {
 /// `0x08`, como exige o PKCS#5.
 fn pad_pkcs5(buf: &mut Vec<u8>) {
     let pad = BLOCK - (buf.len() % BLOCK);
-    buf.extend(std::iter::repeat(pad as u8).take(pad));
+    buf.extend(std::iter::repeat_n(pad as u8, pad));
 }
 
 #[cfg(test)]
