@@ -134,6 +134,13 @@ enum Command {
         #[arg(long)]
         extended: bool,
     },
+    /// Testa o SecurityAccess do BCM: pede semente, calcula a chave e a envia.
+    /// NÃO grava nada; só desbloqueia (e trava de volta ao sair da sessão).
+    CcfUnlock {
+        /// Constante de segurança do BCM (DC0164) em hex, 5 bytes.
+        #[arg(long)]
+        constant: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -185,8 +192,99 @@ fn main() -> Result<()> {
         } => {
             raw(&mut dev, &module, &hex, extended)?;
         }
+        Command::CcfUnlock { constant } => {
+            let c = parse_hex(&constant)?;
+            anyhow::ensure!(c.len() == 5, "a constante deve ter 5 bytes");
+            let mut c5 = [0u8; 5];
+            c5.copy_from_slice(&c);
+            unlock_bcm(&mut dev, c5)?;
+        }
     }
     Ok(())
+}
+
+const BCM_REQ: u16 = 0x726;
+const BCM_RESP: u16 = 0x72E;
+
+/// Faz o SecurityAccess diagnóstico do BCM (nível 0x03): sessão estendida,
+/// pedir semente (0x27 0x03), calcular a chave e enviá-la (0x27 0x04).
+/// Retorna Ok(true) se o módulo aceitou a chave. NÃO grava nada.
+fn unlock_bcm<T: Transport>(dev: &mut Device<T>, constant: [u8; 5]) -> Result<bool> {
+    dev.add_flow_control_filter(BCM_RESP, BCM_REQ)
+        .map_err(|e| anyhow::anyhow!("filtro BCM: {e:?}"))?;
+
+    // Sessão estendida.
+    let s = dev
+        .request_iso_tp(BCM_REQ, &[0x10, 0x03], Duration::from_millis(500))
+        .unwrap_or_default();
+    anyhow::ensure!(
+        s.iter().any(|r| r.service.first() == Some(&0x50)),
+        "o BCM não entrou em sessão estendida"
+    );
+    println!("Sessão estendida OK.");
+
+    // Pedir semente (0x27 0x03).
+    let seed_resp = dev
+        .request_iso_tp(BCM_REQ, &[0x27, 0x03], Duration::from_millis(500))
+        .map_err(|e| anyhow::anyhow!("pedir semente: {e:?}"))?;
+    let seed_msg = seed_resp
+        .iter()
+        .find(|r| r.service.first() == Some(&0x67) && r.service.get(1) == Some(&0x03))
+        .with_context(|| {
+            format!(
+                "sem resposta de semente (respostas: {})",
+                seed_resp
+                    .iter()
+                    .map(|r| hexdump(&r.service))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            )
+        })?;
+    anyhow::ensure!(seed_msg.service.len() >= 5, "semente curta");
+    let seed = [
+        seed_msg.service[2],
+        seed_msg.service[3],
+        seed_msg.service[4],
+    ];
+    println!("Semente recebida: {}", hexdump(&seed));
+
+    if seed == [0, 0, 0] {
+        println!("Semente zero: o módulo já está desbloqueado.");
+        return Ok(true);
+    }
+
+    // Calcular a chave com o gerador validado.
+    let key = jlr_security::iso14229_key(seed, constant);
+    println!("Chave calculada: {}", hexdump(&key));
+
+    // Enviar a chave (0x27 0x04).
+    let mut send = vec![0x27, 0x04];
+    send.extend_from_slice(&key);
+    let key_resp = dev
+        .request_iso_tp(BCM_REQ, &send, Duration::from_millis(700))
+        .map_err(|e| anyhow::anyhow!("enviar chave: {e:?}"))?;
+
+    if key_resp
+        .iter()
+        .any(|r| r.service.first() == Some(&0x67) && r.service.get(1) == Some(&0x04))
+    {
+        println!("\n*** BCM DESBLOQUEADO: a chave foi ACEITA pelo módulo real. ***");
+        println!("(Nada foi gravado; o módulo trava de novo ao sair da sessão.)");
+        Ok(true)
+    } else if let Some(neg) = key_resp.iter().find(|r| r.service.first() == Some(&0x7F)) {
+        let nrc = neg.service.get(2).copied().unwrap_or(0);
+        let motivo = match nrc {
+            0x35 => "chave inválida",
+            0x36 => "número de tentativas excedido",
+            0x37 => "tempo de atraso ativo (aguarde)",
+            _ => "ver código",
+        };
+        println!("\nChave recusada (NRC {nrc:#04X}: {motivo}).");
+        Ok(false)
+    } else {
+        println!("\nSem resposta clara ao enviar a chave.");
+        Ok(false)
+    }
 }
 
 fn raw<T: Transport>(dev: &mut Device<T>, module: &str, hex: &str, extended: bool) -> Result<()> {
