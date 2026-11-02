@@ -67,3 +67,15 @@ Referências públicas (metodologia, não a chave da JLR):
 Pedir semente (0x27 03) é leitura e pode ser repetido. Só o envio de chave
 errada (0x27 04) penaliza. A estratégia é não enviar chave até ter alta
 confiança (algoritmo conferido e, de preferência, validado contra captura).
+
+## Checksum (reconstrução em andamento)
+
+Algoritmo confirmado da `VbfConversion.dll` (`PerformEUCD_CCCChecksum`): soma de
+8 bits dos bytes de uma faixa, `checksum = soma & 0xff`. Pistas no CCF real do
+carro: `(-soma8(bloco1)) & 0xff == 0x53`, que é o `VEH_BUILD_CHECKSUM_BYTE_1`
+armazenado — ou seja, checksum de complemento de dois (soma de dados + byte de
+checksum ≡ 0 mod 256). Posições na imagem do DID 0xDE00: EUCD checksum em
+562/563, VEH_BUILD em 696/697 (bloco 5, bytes 2/3 e 136/137). Falta fixar a
+faixa exata de cada um (o SDD soma sobre o buffer VBF, cujo layout difere da
+imagem crua). Enquanto não fechado, `ccf-set` fica bloqueado; `ccf-writeback`
+(regravar idêntico) não precisa do checksum.
