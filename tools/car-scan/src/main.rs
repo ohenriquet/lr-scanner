@@ -207,6 +207,35 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Grava o CCF pela via de FLASH (VBF CARCFG): erase 0xFFAC00 ->
+    /// RequestDownload -> TransferData (em pedaços) -> TransferExit -> verifica.
+    /// Supera o limite de 128 bytes do 0x2E. Por padrão faz só um PROBE
+    /// não-destrutivo (não apaga/grava). Com --write + --yes, GRAVA de verdade.
+    CcfFlash {
+        /// Constante diagnóstica do BCM (DC0164), hex 5 bytes.
+        #[arg(long)]
+        constant: String,
+        /// Constante de programação do BCM (DC0163), hex 5 bytes.
+        #[arg(long)]
+        prog_constant: String,
+        /// Imagem alvo (.bin, 1024 bytes). Sem isto, usa o CCF atual
+        /// (regravação IDÊNTICA — não muda nenhuma opção).
+        #[arg(long)]
+        image: Option<String>,
+        /// RoutineId do erase (hex). Padrão FF00 (eraseMemory UDS).
+        #[arg(long, default_value = "FF00")]
+        erase_routine: String,
+        /// RoutineId a rodar ANTES do erase/download (ex.: 716E "Start Control
+        /// Unit Program"). Opcional; sem isto, não roda nada antes.
+        #[arg(long)]
+        start_routine: Option<String>,
+        /// GRAVA de verdade (erase+download+transfer). Sem isto é só probe.
+        #[arg(long)]
+        write: bool,
+        /// Confirmação obrigatória quando --write.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -308,6 +337,42 @@ fn main() -> Result<()> {
             let v = parse_hex(&value)?;
             anyhow::ensure!(v.len() == 1, "o valor deve ser 1 byte");
             ccf_set(&mut dev, parse_constant(&constant)?, offset, v[0], yes)?;
+        }
+        Command::CcfFlash {
+            constant,
+            prog_constant,
+            image,
+            erase_routine,
+            start_routine,
+            write,
+            yes,
+        } => {
+            let parse_u16 = |s: &str| -> Result<u16> {
+                u16::from_str_radix(s.trim_start_matches("0x"), 16)
+                    .map_err(|e| anyhow::anyhow!("routineId inválido '{s}': {e}"))
+            };
+            let img = match &image {
+                Some(p) => {
+                    let b = std::fs::read(p).with_context(|| format!("ler {p}"))?;
+                    Some(b)
+                }
+                None => None,
+            };
+            let start = match &start_routine {
+                Some(s) => Some(parse_u16(s)?),
+                None => None,
+            };
+            sw_setup(&mut dev)?;
+            ccf_flash(
+                &mut dev,
+                parse_constant(&constant)?,
+                parse_constant(&prog_constant)?,
+                img,
+                parse_u16(&erase_routine)?,
+                start,
+                write,
+                yes,
+            )?;
         }
     }
     Ok(())
@@ -490,6 +555,206 @@ fn probe_prog<T: Transport<Error: 'static>>(
         }
     }
     println!("Nenhuma combinação de endereço/tamanho foi aceita nesta sondagem.");
+    Ok(())
+}
+
+/// Entra na sessão de programação (0x10 02) e desbloqueia a segurança de
+/// programação (0x27 01/02, constante DC0163). Retorna true se destravou.
+fn prog_unlock_bcm_sw<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    prog_const: [u8; 5],
+) -> Result<bool> {
+    let s = sw_uds(dev, &[0x10, 0x02], 1500)?;
+    if s.first() != Some(&0x50) {
+        println!("Sessão de programação negada: {}", hexdump(&s));
+        return Ok(false);
+    }
+    std::thread::sleep(Duration::from_millis(150));
+    let _ = sw_uds(dev, &[0x3E, 0x00], 1000);
+    let seed = sw_uds(dev, &[0x27, 0x01], 1000)?;
+    if seed.first() != Some(&0x67) || seed.len() < 5 {
+        println!("Seed de programação inesperada: {}", hexdump(&seed));
+        return Ok(false);
+    }
+    let s3 = [seed[2], seed[3], seed[4]];
+    if s3 == [0, 0, 0] {
+        return Ok(true); // já desbloqueado
+    }
+    let key = jlr_security::iso14229_key(s3, prog_const);
+    let mut k = vec![0x27, 0x02];
+    k.extend_from_slice(&key);
+    let kr = sw_uds(dev, &k, 1200)?;
+    Ok(kr.first() == Some(&0x67))
+}
+
+/// Monta um UDS com endereço+tamanho no formato 0x44 (4 bytes cada).
+fn alfid44(service: u8, sub: &[u8], addr: u32, len: u32) -> Vec<u8> {
+    let mut v = vec![service];
+    v.extend_from_slice(sub);
+    v.extend_from_slice(&addr.to_be_bytes());
+    v.extend_from_slice(&len.to_be_bytes());
+    v
+}
+
+/// Timestamp simples (segundos desde a época) para nomear backups.
+fn now_stamp() -> String {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("{t}")
+}
+
+/// Grava o CCF pela via de FLASH (VBF CARCFG). Região 0x00FFAC00, 698 bytes de
+/// config (erase de 1024). Com `write=false` faz só um probe não-destrutivo.
+#[allow(clippy::too_many_arguments)]
+fn ccf_flash<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    diag_const: [u8; 5],
+    prog_const: [u8; 5],
+    image: Option<Vec<u8>>,
+    erase_routine: u16,
+    start_routine: Option<u16>,
+    write: bool,
+    yes: bool,
+) -> Result<()> {
+    const ADDR: u32 = 0x00FF_AC00;
+    const ERASE_LEN: u32 = 0x0400; // 1024
+    const CFG_LEN: usize = 698;
+
+    // 1) Lê o CCF atual (baseline + backup).
+    let current = read_ccf_sw(dev)?;
+    anyhow::ensure!(current.len() >= CFG_LEN, "CCF curto: {} bytes", current.len());
+    let backup = format!("captures/ccf_preflash_{}.bin", now_stamp());
+    std::fs::create_dir_all("captures").ok();
+    std::fs::write(&backup, &current)?;
+    println!("CCF atual lido ({} bytes). Backup: {backup}", current.len());
+
+    // 2) Imagem alvo (default = idêntica).
+    let target = match image {
+        Some(img) => {
+            anyhow::ensure!(
+                img.len() == current.len(),
+                "imagem alvo tem {} bytes; esperado {}",
+                img.len(),
+                current.len()
+            );
+            img
+        }
+        None => current.clone(),
+    };
+    let changed: Vec<usize> = (0..CFG_LEN).filter(|&i| current[i] != target[i]).collect();
+    if changed.is_empty() {
+        println!("Alvo = regravação IDÊNTICA (nenhum byte de config muda).");
+    } else {
+        println!("Alvo muda {} byte(s) da config:", changed.len());
+        for &i in changed.iter().take(16) {
+            println!("  byte {i}: 0x{:02X} -> 0x{:02X}", current[i], target[i]);
+        }
+    }
+
+    // 3) Desbloqueio (diagnóstico + programação).
+    anyhow::ensure!(
+        unlock_bcm_sw(dev, diag_const)?,
+        "não desbloqueou a sessão diagnóstica"
+    );
+    anyhow::ensure!(
+        prog_unlock_bcm_sw(dev, prog_const)?,
+        "não desbloqueou a segurança de programação"
+    );
+    println!("Programação desbloqueada.");
+
+    // 4) Rotina opcional antes do flash (ex.: 0x716E Start Control Unit Program).
+    if let Some(rid) = start_routine {
+        let req = vec![0x31, 0x01, (rid >> 8) as u8, (rid & 0xff) as u8];
+        let r = sw_uds(dev, &req, 5000)?;
+        println!("RoutineControl start {rid:#06X}: {}", hexdump(&r));
+    }
+
+    if !write {
+        // PROBE não-destrutivo: tenta RequestDownload (sem erase/transfer).
+        let rd = alfid44(0x34, &[0x00, 0x44], ADDR, CFG_LEN as u32);
+        println!("PROBE RequestDownload (sem erase): {}", hexdump(&rd));
+        let r = sw_uds(dev, &rd, 3000)?;
+        println!("  resposta: {}", hexdump(&r));
+        if r.first() == Some(&0x74) {
+            println!(">>> ACEITO sem erase! Abortando com 0x37 (nada gravado).");
+            let _ = sw_uds(dev, &[0x37], 2000);
+        } else {
+            println!("Rejeitado sem erase. Nada foi apagado/gravado (probe seguro).");
+        }
+        let _ = sw_uds(dev, &[0x10, 0x01], 1000); // volta à sessão padrão
+        return Ok(());
+    }
+
+    // === GRAVAÇÃO (destrutivo a partir do erase) ===
+    anyhow::ensure!(yes, "--write exige --yes (vai APAGAR e regravar o CCF do BCM)");
+
+    // 5) ERASE.
+    let erase = alfid44(
+        0x31,
+        &[0x01, (erase_routine >> 8) as u8, (erase_routine & 0xff) as u8],
+        ADDR,
+        ERASE_LEN,
+    );
+    println!("ERASE: {}", hexdump(&erase));
+    let r = sw_uds(dev, &erase, 15000)?;
+    println!("  resposta erase: {}", hexdump(&r));
+    anyhow::ensure!(
+        r.first() == Some(&0x71),
+        "erase NEGADO ({}); nada foi apagado — abortando",
+        hexdump(&r)
+    );
+    println!(">>> Região apagada. É preciso completar a gravação agora.");
+
+    // 6) RequestDownload.
+    let rd = alfid44(0x34, &[0x00, 0x44], ADDR, CFG_LEN as u32);
+    let r = sw_uds(dev, &rd, 5000)?;
+    anyhow::ensure!(
+        r.first() == Some(&0x74) && r.len() >= 2,
+        "RequestDownload NEGADO: {}",
+        hexdump(&r)
+    );
+    let nbytes = ((r[1] >> 4) as usize).min(r.len() - 2);
+    let mut maxblk = 0usize;
+    for b in &r[2..2 + nbytes] {
+        maxblk = (maxblk << 8) | *b as usize;
+    }
+    let chunk = maxblk.saturating_sub(2).clamp(1, 126);
+    println!("RequestDownload OK. maxBlockLength={maxblk}, pedaço={chunk} bytes.");
+
+    // 7) TransferData em pedaços.
+    let data = &target[..CFG_LEN];
+    let mut seq: u8 = 1;
+    let mut off = 0;
+    while off < data.len() {
+        let end = (off + chunk).min(data.len());
+        let mut td = vec![0x36, seq];
+        td.extend_from_slice(&data[off..end]);
+        let r = sw_uds(dev, &td, 5000)?;
+        anyhow::ensure!(
+            r.first() == Some(&0x76) && r.get(1) == Some(&seq),
+            "TransferData seq {seq} NEGADO em {off}: {}",
+            hexdump(&r)
+        );
+        off = end;
+        seq = seq.wrapping_add(1);
+    }
+    println!("TransferData completo ({} bytes).", data.len());
+
+    // 8) TransferExit.
+    let r = sw_uds(dev, &[0x37], 5000)?;
+    println!("TransferExit: {}", hexdump(&r));
+
+    // 9) Reset + verificação por releitura.
+    let _ = sw_uds(dev, &[0x11, 0x01], 2000); // ECUReset
+    std::thread::sleep(Duration::from_millis(1500));
+    let after = read_ccf_sw(dev).unwrap_or_default();
+    if after.len() >= CFG_LEN && after[..CFG_LEN] == target[..CFG_LEN] {
+        println!(">>> SUCESSO: releitura confere com o alvo ({CFG_LEN} bytes).");
+    } else {
+        println!("ATENÇÃO: releitura NÃO confere. Regrave o backup {backup} com --image <arquivo> --write --yes.");
+    }
     Ok(())
 }
 
