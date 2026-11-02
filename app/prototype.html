@@ -416,6 +416,9 @@
           <div class="split wide">
             <div class="card" style="padding:12px">
               <div class="picker">
+                <div style="font-size:11px;color:var(--ink-3);margin-bottom:8px;line-height:1.4">
+                  Parâmetros com módulo e DID reais do pacote do veículo. No app real: <b>3102</b> sinais por módulo (PCM, TCM, ABS, RLM…), com escala e unidade do SDD. Aqui, uma seleção com valores simulados.
+                </div>
                 <input class="psearch" id="psearch" placeholder="Filtrar parâmetros…" aria-label="Filtrar parâmetros">
                 <div class="plist" id="plist"></div>
               </div>
@@ -579,6 +582,13 @@
   ];
   function corner(base,amp,ph){ return function(t){ return base+Math.sin(t/16+ph)*amp*0.4+(Math.random()-.5)*0.3; }; }
   function warm(a,b,tau){ return function(t){ return (b-(b-a)*Math.exp(-t/tau))+(Math.random()-.5)*0.6; }; }
+  // Módulo/DID reais (do catálogo de live data do SDD: tabela did/did_param do
+  // pacote). Os DIDs da suspensão foram verificados (RLM 0x3B03-06, compressor
+  // 0xD11A). No app real, a lista inteira (3102 parâmetros) vem do pacote.
+  var GMOD = {"Motor":"PCM","Diesel":"PCM","Elétrico":"PCM","Chassi":"ABS","Suspensão a ar":"RLM"};
+  var PDID = {maf:"0504", hFL:"3B03", hFR:"3B04", hRL:"3B05", hRR:"3B06", compT:"D11A"};
+  var PMOD = {sas:"SASM", rail:"PCM", inj:"PCM", dpf:"PCM", egt:"PCM", batt:"PCM", fuel:"IPC"};
+  PARAMS.forEach(function(p){ p.mod = PMOD[p.id] || GMOD[p.g] || ""; if(PDID[p.id]) p.did = PDID[p.id]; });
 
   var WINDOW = 60, HZ = 4, MODE = "stack", PLAYING = true;
   var CAP = 120 * HZ; // buffer máx (2 min)
@@ -602,7 +612,8 @@
       items.forEach(function (p) {
         var row = document.createElement("div"); row.className="prow"; row.dataset.on = p.on?"1":"0";
         row.style.setProperty("--sw", css(p.color));
-        row.innerHTML = '<span class="swatch"></span><div class="pl"><b>'+p.label+'</b><span>'+p.id.toUpperCase()+'</span></div>'+
+        var tag = (p.mod||"") + (p.did ? " · 0x"+p.did : (p.mod?"":p.id.toUpperCase()));
+        row.innerHTML = '<span class="swatch"></span><div class="pl"><b>'+p.label+'</b><span>'+(tag||p.id.toUpperCase())+'</span></div>'+
           '<div class="pv" id="pv-'+p.id+'">'+fmt(p)+'<br><small>'+p.unit+'</small></div>';
         row.onclick = function(){ p.on=!p.on; row.dataset.on=p.on?"1":"0"; syncLive(); };
         plist.appendChild(row);
