@@ -92,6 +92,9 @@ enum Command {
         /// Código do DTC (ex.: C1A13).
         #[arg(long)]
         code: String,
+        /// Módulo (ex.: RLM). Sem isso, mostra todos os módulos do código.
+        #[arg(long)]
+        module: Option<String>,
     },
     /// Lista o live data (DIDs legíveis) de um módulo, com escala e unidade.
     DidDump {
@@ -164,7 +167,11 @@ fn main() -> Result<()> {
             filter,
             all,
         } => cmd_ccf_decode(&pack, &ccf, filter.as_deref(), all),
-        Command::DtcHelp { pack, code } => cmd_dtc_help(&pack, &code),
+        Command::DtcHelp {
+            pack,
+            code,
+            module,
+        } => cmd_dtc_help(&pack, &code, module.as_deref()),
         Command::DidDump {
             pack,
             module,
@@ -275,20 +282,39 @@ struct DidRow {
     source: String,
 }
 
-/// Imprime o help de diagnóstico de um DTC a partir de um pacote.
-fn cmd_dtc_help(pack: &std::path::Path, code: &str) -> Result<()> {
+/// Imprime o help de diagnóstico de um DTC (por módulo) a partir de um pacote.
+fn cmd_dtc_help(pack: &std::path::Path, code: &str, module: Option<&str>) -> Result<()> {
     let conn = Connection::open(pack).with_context(|| format!("abrir {}", pack.display()))?;
     let code = code.to_uppercase();
 
     // Descrição curta (gdx), se houver.
-    if let Ok(desc) = conn.query_row(
+    match conn.query_row(
         "SELECT description FROM dtc_text WHERE code = ?1",
         [&code],
         |r| r.get::<_, String>(0),
     ) {
-        println!("{code}  {desc}\n");
-    } else {
-        println!("{code}\n");
+        Ok(desc) => println!("{code}  {desc}"),
+        Err(_) => println!("{code}"),
+    }
+
+    // Módulos com help para este código.
+    let mut mstmt = conn.prepare(
+        "SELECT DISTINCT module FROM dtc_help WHERE code = ?1 ORDER BY module",
+    )?;
+    let all_modules: Vec<String> = mstmt
+        .query_map([&code], |r| r.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    let modules: Vec<String> = match module {
+        Some(m) => all_modules
+            .into_iter()
+            .filter(|x| x.eq_ignore_ascii_case(m))
+            .collect(),
+        None => all_modules,
+    };
+    if modules.is_empty() {
+        println!("\n(sem help de diagnóstico para {code} neste pacote)");
+        return Ok(());
     }
 
     let titles = [
@@ -297,26 +323,24 @@ fn cmd_dtc_help(pack: &std::path::Path, code: &str) -> Result<()> {
         ("causes", "Causas prováveis"),
         ("actions", "Ações recomendadas"),
     ];
-    let mut found = false;
-    for (sec, title) in titles {
-        let mut stmt =
-            conn.prepare("SELECT text FROM dtc_help WHERE code = ?1 AND section = ?2 ORDER BY ord")?;
-        let rows: Vec<String> = stmt
-            .query_map(rusqlite::params![code, sec], |r| r.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        if rows.is_empty() {
-            continue;
+    for m in modules {
+        println!("\n=== módulo {m} ===");
+        for (sec, title) in titles {
+            let mut stmt = conn.prepare(
+                "SELECT text FROM dtc_help WHERE code = ?1 AND module = ?2 AND section = ?3 ORDER BY ord",
+            )?;
+            let rows: Vec<String> = stmt
+                .query_map(rusqlite::params![code, m, sec], |r| r.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            if rows.is_empty() {
+                continue;
+            }
+            println!("{title}:");
+            for t in rows {
+                println!("  • {t}");
+            }
         }
-        found = true;
-        println!("{title}:");
-        for t in rows {
-            println!("  • {t}");
-        }
-        println!();
-    }
-    if !found {
-        println!("(sem help de diagnóstico para {code} neste pacote)");
     }
     Ok(())
 }

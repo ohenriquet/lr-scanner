@@ -162,9 +162,9 @@ pub fn import_vehicle(
         Vec::new()
     };
 
-    // Help de diagnóstico por DTC (pt_br preferido, en de reserva). Só os
-    // códigos que se aplicam a este modelo entram no pacote.
-    let dtc_help = load_dtc_help(install, &spec.model)?;
+    // Help de diagnóstico por DTC (pt_br preferido, en de reserva), indexado por
+    // módulo+código. Só os códigos que se aplicam a um módulo do veículo entram.
+    let dtc_help = load_dtc_help(install, spec, &platform.modules)?;
 
     // Live data por módulo (DIDs + conversores), filtrado para este veículo.
     let did_catalog = load_did_catalog(install, spec, &platform.modules)?;
@@ -389,15 +389,22 @@ fn load_did_catalog(
     })
 }
 
-/// Carrega o help de DTC do idioma disponível (pt_br > en), só para os códigos
-/// que se aplicam ao `model`. Pasta ausente -> vazio (os DTCs ficam sem help).
-fn load_dtc_help(install: &SddInstall, model: &str) -> Result<Vec<dtc_help::DtcHelp>, DataError> {
+/// Carrega o help de DTC do idioma disponível (pt_br > en), indexado por
+/// módulo+código, só para os módulos do veículo a que cada código se aplica
+/// (modelo+ano de `spec`). Pasta ausente -> vazio (os DTCs ficam sem help).
+fn load_dtc_help(
+    install: &SddInstall,
+    spec: &ImportSpec,
+    modules: &[model::Module],
+) -> Result<Vec<dtc_help::DtcHelp>, DataError> {
     let lang = ["pt_br", "en"]
         .into_iter()
         .find(|l| install.rds_dtc_help_dir(l).is_dir());
     let Some(lang) = lang else {
         return Ok(Vec::new());
     };
+    let module_set: std::collections::HashSet<String> =
+        modules.iter().map(|m| m.acronym.clone()).collect();
     let dir = install.rds_dtc_help_dir(lang);
     let mut out = Vec::new();
     for entry in std::fs::read_dir(&dir).map_err(|e| DataError::Io(dir.clone(), e))? {
@@ -413,9 +420,7 @@ fn load_dtc_help(install: &SddInstall, model: &str) -> Result<Vec<dtc_help::DtcH
         let Ok(xml) = std::fs::read_to_string(&path) else {
             continue;
         };
-        if let Some(h) = dtc_help::parse(&xml, Some(model))? {
-            out.push(h);
-        }
+        out.extend(dtc_help::parse(&xml, &spec.model, &spec.model_year, &module_set)?);
     }
     Ok(out)
 }

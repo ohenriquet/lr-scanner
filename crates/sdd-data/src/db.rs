@@ -110,11 +110,12 @@ CREATE TABLE dtc_text (
 
 CREATE TABLE dtc_help (
     code    TEXT NOT NULL,     -- código legível (ex.: C1A13)
+    module  TEXT NOT NULL,     -- módulo a que o help se aplica (ex.: RLM)
     section TEXT NOT NULL,     -- supp_desc | symptoms | causes | actions
     ord     INTEGER NOT NULL,  -- ordem dentro da seção
     text    TEXT NOT NULL      -- texto (pt_br quando disponível)
 );
-CREATE INDEX idx_dtchelp_code ON dtc_help(code);
+CREATE INDEX idx_dtchelp_code ON dtc_help(code, module);
 
 -- Live data: DIDs legíveis por módulo (UDS 0x22) e seus parâmetros.
 CREATE TABLE did (
@@ -298,14 +299,15 @@ pub fn write_pack(
         }
     }
 
-    // dtc_help (seções por código).
+    // dtc_help (seções por módulo+código).
     {
-        let mut stmt = tx
-            .prepare("INSERT INTO dtc_help (code, section, ord, text) VALUES (?,?,?,?)")?;
+        let mut stmt = tx.prepare(
+            "INSERT INTO dtc_help (code, module, section, ord, text) VALUES (?,?,?,?,?)",
+        )?;
         for h in dtc_help {
             for (section, items) in h.sections() {
                 for (i, text) in items.iter().enumerate() {
-                    stmt.execute(params![h.code, section, i as i64, text])?;
+                    stmt.execute(params![h.code, h.module, section, i as i64, text])?;
                 }
             }
         }
