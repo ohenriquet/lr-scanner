@@ -116,7 +116,7 @@ impl IsoTpReassembler {
             return Vec::new();
         }
         let announced = ((frame[IDENTIFIER] & 0x0f) as usize) << 8 | frame[IDENTIFIER + 1] as usize;
-        if announced < SEGMENTED_MINIMUM || announced > MAX_MESSAGE {
+        if !(SEGMENTED_MINIMUM..=MAX_MESSAGE).contains(&announced) {
             return Vec::new();
         }
         let mut message = with_identifier(frame);

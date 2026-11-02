@@ -105,6 +105,17 @@ enum Command {
     Dtcs,
     /// VIN + varredura + DTCs, em sequência.
     All,
+    /// Lê dados ao vivo do motor (OBD modo 01: temperaturas, tensão, RPM).
+    Live,
+    /// Limpa os DTCs. ESCREVE no veículo: exige --yes. Opcional --module SIGLA.
+    Clear {
+        /// Confirmação obrigatória para gravar.
+        #[arg(long)]
+        yes: bool,
+        /// Limita a um módulo (sigla, ex.: PCM); sem isso, limpa todos.
+        #[arg(long)]
+        module: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -140,7 +151,110 @@ fn main() -> Result<()> {
             println!();
             read_all_dtcs(&mut dev, &present)?;
         }
+        Command::Live => {
+            read_live(&mut dev)?;
+        }
+        Command::Clear { yes, module } => {
+            clear_dtcs(&mut dev, yes, module.as_deref())?;
+        }
     }
+    Ok(())
+}
+
+/// Leitura de dados ao vivo via OBD-II modo 01 (padrão, somente leitura).
+fn read_live<T: Transport>(dev: &mut Device<T>) -> Result<()> {
+    // Responde quem tiver OBD: PCM em 0x7E8, pede-se a 0x7E0.
+    dev.add_flow_control_filter(0x7E8, 0x7E0)
+        .map_err(|e| anyhow::anyhow!("filtro OBD: {e:?}"))?;
+    println!("Dados ao vivo (OBD modo 01):");
+    // (PID, rótulo, decodificador)
+    type Dec = fn(&[u8]) -> String;
+    let pids: &[(u8, &str, Dec)] = &[
+        (0x05, "Temp. líq. arrefecimento", |d| {
+            format!("{} °C", d[0] as i32 - 40)
+        }),
+        (0x0F, "Temp. ar admissão", |d| {
+            format!("{} °C", d[0] as i32 - 40)
+        }),
+        (0x0C, "Rotação", |d| {
+            format!("{} rpm", ((d[0] as u32) << 8 | d[1] as u32) / 4)
+        }),
+        (0x0D, "Velocidade", |d| format!("{} km/h", d[0])),
+        (0x42, "Tensão do módulo", |d| {
+            format!(
+                "{:.2} V",
+                ((d[0] as u32) << 8 | d[1] as u32) as f32 / 1000.0
+            )
+        }),
+        (0x2F, "Nível de combustível", |d| {
+            format!("{:.0} %", d[0] as f32 * 100.0 / 255.0)
+        }),
+        (0x33, "Pressão barométrica", |d| format!("{} kPa", d[0])),
+        (0x5C, "Temp. óleo motor", |d| {
+            format!("{} °C", d[0] as i32 - 40)
+        }),
+    ];
+    for &(pid, label, dec) in pids {
+        let answers = dev
+            .request_iso_tp(0x7E0, &[0x01, pid], Duration::from_millis(350))
+            .unwrap_or_default();
+        // Resposta: 41 <pid> <dados...>
+        let val = answers.iter().find_map(|r| {
+            if r.service.len() >= 3 && r.service[0] == 0x41 && r.service[1] == pid {
+                Some(dec(&r.service[2..]))
+            } else {
+                None
+            }
+        });
+        match val {
+            Some(v) => println!("  {label:<26} {v}"),
+            None => println!("  {label:<26} (sem suporte/sem resposta)"),
+        }
+    }
+    Ok(())
+}
+
+/// Limpa DTCs (serviço UDS 0x14, grupo 0xFFFFFF = todos). ESCREVE no veículo.
+fn clear_dtcs<T: Transport>(dev: &mut Device<T>, yes: bool, module: Option<&str>) -> Result<()> {
+    if !yes {
+        anyhow::bail!("limpar DTCs escreve no veículo. Repita com --yes para confirmar.");
+    }
+    let alvos: Vec<(&str, u16, u16)> = match module {
+        Some(m) => MODULES
+            .iter()
+            .copied()
+            .filter(|(name, _, _)| name.eq_ignore_ascii_case(m))
+            .collect(),
+        None => {
+            // Só os que respondem, para não esperar por módulos ausentes.
+            scan(dev)?
+        }
+    };
+    if alvos.is_empty() {
+        anyhow::bail!("nenhum módulo alvo (verifique a sigla).");
+    }
+    println!("\nLimpando DTCs (serviço 0x14, todos os grupos):");
+    for (name, req, resp) in alvos {
+        let _ = dev.add_flow_control_filter(resp, req);
+        let answers = dev
+            .request_iso_tp(req, &[0x14, 0xFF, 0xFF, 0xFF], Duration::from_millis(900))
+            .unwrap_or_default();
+        let ok = answers
+            .iter()
+            .any(|r| r.can_id == resp as u32 && r.service.first() == Some(&0x54));
+        let neg = answers
+            .iter()
+            .find(|r| r.can_id == resp as u32 && r.service.first() == Some(&0x7F));
+        if ok {
+            println!("  {name:<6}: limpo");
+        } else if let Some(r) = neg {
+            let nrc = r.service.get(2).copied().unwrap_or(0);
+            println!("  {name:<6}: recusado (NRC {nrc:#04X})");
+        } else {
+            println!("  {name:<6}: sem resposta");
+        }
+    }
+    println!("\nReleia os DTCs para confirmar.");
     Ok(())
 }
 
