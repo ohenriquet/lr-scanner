@@ -116,6 +116,24 @@ enum Command {
         #[arg(long)]
         module: Option<String>,
     },
+    /// Lê o CCF (configuração do veículo) do BCM e salva um backup. Leitura pura.
+    Ccf {
+        /// Arquivo de saída do backup bruto (.bin).
+        #[arg(long, default_value = "ccf_backup.bin")]
+        out: String,
+    },
+    /// Diagnóstico: envia bytes crus a um módulo e mostra todas as respostas.
+    Raw {
+        /// Sigla do módulo (ex.: BCM).
+        #[arg(long)]
+        module: String,
+        /// Serviço em hex (ex.: 22DD01 ou 22DE00).
+        #[arg(long)]
+        hex: String,
+        /// Entrar em sessão estendida (0x10 03) antes.
+        #[arg(long)]
+        extended: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -157,8 +175,128 @@ fn main() -> Result<()> {
         Command::Clear { yes, module } => {
             clear_dtcs(&mut dev, yes, module.as_deref())?;
         }
+        Command::Ccf { out } => {
+            read_ccf(&mut dev, &out)?;
+        }
+        Command::Raw {
+            module,
+            hex,
+            extended,
+        } => {
+            raw(&mut dev, &module, &hex, extended)?;
+        }
     }
     Ok(())
+}
+
+fn raw<T: Transport>(dev: &mut Device<T>, module: &str, hex: &str, extended: bool) -> Result<()> {
+    let (_, req, resp) = *MODULES
+        .iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(module))
+        .with_context(|| format!("módulo {module} desconhecido"))?;
+    let bytes = parse_hex(hex)?;
+    dev.add_flow_control_filter(resp, req)
+        .map_err(|e| anyhow::anyhow!("filtro: {e:?}"))?;
+    if extended {
+        let s = dev
+            .request_iso_tp(req, &[0x10, 0x03], Duration::from_millis(500))
+            .unwrap_or_default();
+        println!("sessão estendida: {} resposta(s)", s.len());
+        for r in &s {
+            println!("  de {:#05X}: {}", r.can_id, hexdump(&r.service));
+        }
+    }
+    println!("Enviando a {module} (req {req:#05X}): {}", hexdump(&bytes));
+    let answers = dev
+        .request_iso_tp(req, &bytes, Duration::from_millis(1500))
+        .map_err(|e| anyhow::anyhow!("enviar: {e:?}"))?;
+    if answers.is_empty() {
+        println!("  (sem resposta)");
+    }
+    for r in &answers {
+        let kind = match r.service.first() {
+            Some(0x7F) => " [resposta negativa]",
+            _ => "",
+        };
+        println!(
+            "  de {:#05X} ({} bytes){kind}: {}",
+            r.can_id,
+            r.service.len(),
+            hexdump(&r.service)
+        );
+    }
+    Ok(())
+}
+
+fn parse_hex(s: &str) -> Result<Vec<u8>> {
+    let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    anyhow::ensure!(clean.len() % 2 == 0, "hex com número ímpar de dígitos");
+    (0..clean.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).map_err(Into::into))
+        .collect()
+}
+
+/// Lê o CCF do BCM (DID 0xDE00, serviço 0x22) e salva um backup bruto.
+/// Tenta na sessão padrão; se recusado, entra em sessão estendida (0x10 03)
+/// e repete. Operação de leitura (a troca de sessão é reversível).
+fn read_ccf<T: Transport>(dev: &mut Device<T>, out: &str) -> Result<()> {
+    const BCM_REQ: u16 = 0x726;
+    const BCM_RESP: u16 = 0x72E;
+    dev.add_flow_control_filter(BCM_RESP, BCM_REQ)
+        .map_err(|e| anyhow::anyhow!("filtro BCM: {e:?}"))?;
+
+    // O CCF tem ~1 KB (~147 quadros ISO-TP); a janela precisa ser generosa.
+    let read = |dev: &mut Device<T>| {
+        dev.request_iso_tp(BCM_REQ, &[0x22, 0xDE, 0x00], Duration::from_millis(2500))
+            .unwrap_or_default()
+    };
+
+    let mut answers = read(dev);
+    let mut positive = find_positive(&answers, BCM_RESP);
+
+    if positive.is_none() {
+        // Pode exigir sessão estendida. 0x10 03 é reversível.
+        println!("CCF recusado na sessão padrão; tentando sessão estendida (0x10 03)...");
+        let _ = dev.request_iso_tp(BCM_REQ, &[0x10, 0x03], Duration::from_millis(500));
+        answers = read(dev);
+        positive = find_positive(&answers, BCM_RESP);
+        // Volta à sessão padrão.
+        let _ = dev.request_iso_tp(BCM_REQ, &[0x10, 0x01], Duration::from_millis(400));
+    }
+
+    match positive {
+        Some(data) => {
+            // data = 62 DE 00 + bytes do CCF
+            let ccf = &data[3..];
+            println!("CCF lido do BCM: {} bytes.", ccf.len());
+            std::fs::write(out, ccf).with_context(|| format!("salvar {out}"))?;
+            println!("Backup salvo em {out}");
+            // Primeiros bytes para conferência.
+            let head = &ccf[..ccf.len().min(32)];
+            println!("Início: {}", hexdump(head));
+        }
+        None => {
+            println!("Não consegui ler o CCF. Respostas:");
+            for r in &answers {
+                println!("  de {:#05X}: {}", r.can_id, hexdump(&r.service));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn find_positive(answers: &[mongoose::client::IsoTpResponse], resp_id: u16) -> Option<Vec<u8>> {
+    answers
+        .iter()
+        .find(|r| {
+            r.can_id == resp_id as u32
+                && r.service.len() > 3
+                && r.service[0] == 0x62
+                && r.service[1] == 0xDE
+                && r.service[2] == 0x00
+        })
+        .map(|r| r.service.clone())
 }
 
 /// Leitura de dados ao vivo via OBD-II modo 01 (padrão, somente leitura).

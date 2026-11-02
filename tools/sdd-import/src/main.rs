@@ -63,6 +63,21 @@ enum Command {
         #[arg(long)]
         filter: Option<String>,
     },
+    /// Decodifica um CCF bruto (.bin lido do carro) contra um pacote.
+    CcfDecode {
+        /// Pacote SQLite do veículo/ano certo.
+        #[arg(long)]
+        pack: PathBuf,
+        /// Arquivo .bin com o CCF lido do BCM (resposta sem o 62 DE 00).
+        #[arg(long)]
+        ccf: PathBuf,
+        /// Mostra só parâmetros cujo nome/título/grupo contenham este texto.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Mostra todos (por padrão, oculta os "Indefinida"/sem opção).
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -109,6 +124,12 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::CcfDump { pack, filter } => cmd_ccf_dump(&pack, filter.as_deref()),
+        Command::CcfDecode {
+            pack,
+            ccf,
+            filter,
+            all,
+        } => cmd_ccf_decode(&pack, &ccf, filter.as_deref(), all),
     }
 }
 
@@ -220,6 +241,102 @@ fn cmd_ccf_dump(pack: &PathBuf, filter: Option<&str>) -> Result<()> {
                 label.map(|l| format!("— {l}")).unwrap_or_default(),
             );
         }
+    }
+    println!("\n{count} parâmetros.");
+    Ok(())
+}
+
+/// Decodifica um CCF bruto contra o pacote: para cada parâmetro, calcula o
+/// offset absoluto na imagem (base do bloco + byte do parâmetro) e mostra a
+/// opção correspondente ao valor atual.
+fn cmd_ccf_decode(
+    pack: &PathBuf,
+    ccf_path: &PathBuf,
+    filter: Option<&str>,
+    all: bool,
+) -> Result<()> {
+    let ccf = std::fs::read(ccf_path).with_context(|| format!("ler {}", ccf_path.display()))?;
+    let conn = Connection::open(pack).with_context(|| format!("abrir {}", pack.display()))?;
+
+    // Offset de cada bloco na imagem do DID = menor start_address do bloco no
+    // BCM menos o start_address do bloco 1 (a base da imagem).
+    let base_addr: i64 = conn
+        .query_row(
+            "SELECT MIN(start_address) FROM ccf_address WHERE module LIKE 'BCM%'",
+            [],
+            |r| r.get(0),
+        )
+        .context("sem endereços de CCF no BCM")?;
+    let mut block_base: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT block_id, MIN(start_address) FROM ccf_address
+             WHERE module LIKE 'BCM%' AND start_address IS NOT NULL GROUP BY block_id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        for row in rows {
+            let (bid, sa) = row?;
+            block_base.insert(bid, sa - base_addr);
+        }
+    }
+
+    let like = filter
+        .map(|f| format!("%{}%", f.to_uppercase()))
+        .unwrap_or_else(|| "%".into());
+    let mut stmt = conn.prepare(
+        "SELECT id, block_id, name, byte_start, mask, title, ptype FROM ccf_param
+         WHERE UPPER(name) LIKE ?1 OR UPPER(IFNULL(grp,'')) LIKE ?1 OR UPPER(IFNULL(title,'')) LIKE ?1
+         ORDER BY block_id, byte_start, bit_start",
+    )?;
+    let rows = stmt.query_map([&like], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i64>(3)?,
+            r.get::<_, Option<i64>>(4)?,
+            r.get::<_, Option<String>>(5)?,
+            r.get::<_, Option<String>>(6)?,
+        ))
+    })?;
+
+    let mut count = 0;
+    for row in rows {
+        let (id, block_id, name, byte_start, mask, title, ptype) = row?;
+        let Some(&base) = block_base.get(&block_id) else {
+            continue;
+        };
+        let off = (base + byte_start) as usize;
+        let Some(&raw) = ccf.get(off) else { continue };
+        let mask = mask.unwrap_or(0xFF) as u8;
+        let val = raw & mask;
+
+        // Opção correspondente ao valor mascarado.
+        let opt: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT name, label FROM ccf_option WHERE param_id=?1 AND value=?2",
+                rusqlite::params![id, val as i64],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+
+        let atual = match &opt {
+            Some((n, l)) => l.clone().unwrap_or_else(|| n.clone()),
+            None => format!("(valor 0x{val:02X})"),
+        };
+        // Sem --all, oculta "Indefinida" e sem opção, para focar no que importa.
+        if !all {
+            let low = atual.to_lowercase();
+            if opt.is_none() || low.contains("indefinid") {
+                continue;
+            }
+        }
+        count += 1;
+        let rotulo = title.clone().unwrap_or_else(|| name.clone());
+        println!(
+            "\n• {rotulo}\n    atual: {atual}   [byte {byte_start} bloco {block_id}, bruto 0x{raw:02X}, tipo {}]",
+            ptype.unwrap_or_default()
+        );
     }
     println!("\n{count} parâmetros.");
     Ok(())
