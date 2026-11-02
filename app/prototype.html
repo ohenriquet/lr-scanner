@@ -565,11 +565,14 @@
     { id:"yaw",   g:"Chassi", label:"Taxa de guinada", unit:"°/s", min:-75, max:75, read:function(t){return Math.sin(t/6)*0.8;} },
     { id:"latg",  g:"Chassi", label:"Aceleração lateral", unit:"g", min:-1.5, max:1.5, read:function(t){return Math.sin(t/6)*0.02;} },
     { id:"brake", g:"Chassi", label:"Pressão de freio", unit:"bar", min:0, max:200, read:function(t){return 0.5+Math.max(0,Math.sin(t/17))*1.0;} },
-    // ---- Suspensão a ar (RLM) ----
-    { id:"resP",  g:"Suspensão a ar", label:"Pressão do reservatório", unit:"bar", min:0, max:20, read:function(t){return 12.6+Math.sin(t/35)*0.4-(t%70>60?0.5:0);} },
-    { id:"compP", g:"Suspensão a ar", label:"Pressão saída compressor", unit:"bar", min:0, max:25, read:function(t){var r=t%70; return r>58&&r<66 ? 14+Math.sin(t*2)*1.5 : 0.1;} },
+    // ---- Suspensão a ar (RLM) — sinais reais expostos pelo módulo ----
+    // Obs.: o RLM do L319 NÃO expõe pressão de galeria/reservatório como DID ao
+    // vivo (isso é só do CHCM, em carros mais novos). Usa-se o que há: tensão/
+    // temperatura do compressor, correntes e % das válvulas.
+    { id:"compV", g:"Suspensão a ar", label:"Tensão do compressor", unit:"V", min:0, max:16, read:function(t){var r=t%70; return r>58&&r<66 ? 12.4+Math.sin(t*2)*0.4 : 0.1;} },
     { id:"compT", g:"Suspensão a ar", label:"Temp. do compressor", unit:"°C", min:0, max:200, read:warm(32,70,220) },
-    { id:"compDuty",g:"Suspensão a ar", label:"Ciclo do compressor", unit:"%", min:0, max:100, read:function(t){var r=t%70; return r>58&&r<66?100:0;} },
+    { id:"exhI",  g:"Suspensão a ar", label:"Corrente válvula de escape", unit:"A", min:0, max:3, read:function(t){var r=t%70; return r>40&&r<48 ? 1.4+Math.sin(t*3)*0.2 : 0.02;} },
+    { id:"xlinkO",g:"Suspensão a ar", label:"Válvula cross-link (% aberta)", unit:"%", min:0, max:100, read:function(t){return t%90>80?100:0;} },
     { id:"hFL",   g:"Suspensão a ar", label:"Altura dianteira esquerda", unit:"mm", min:-50, max:90, read:corner(2.0,0.6,0) },
     { id:"hFR",   g:"Suspensão a ar", label:"Altura dianteira direita", unit:"mm", min:-50, max:90, read:corner(1.4,0.6,1.1) },
     { id:"hRL",   g:"Suspensão a ar", label:"Altura traseira esquerda", unit:"mm", min:-50, max:90, read:corner(3.1,0.7,2.3) },
@@ -586,7 +589,8 @@
   // pacote). Os DIDs da suspensão foram verificados (RLM 0x3B03-06, compressor
   // 0xD11A). No app real, a lista inteira (3102 parâmetros) vem do pacote.
   var GMOD = {"Motor":"PCM","Diesel":"PCM","Elétrico":"PCM","Chassi":"ABS","Suspensão a ar":"RLM"};
-  var PDID = {maf:"0504", hFL:"3B03", hFR:"3B04", hRL:"3B05", hRR:"3B06", compT:"D11A"};
+  var PDID = {maf:"0504", hFL:"3B03", hFR:"3B04", hRL:"3B05", hRR:"3B06",
+              compT:"D11A", compV:"3B1F", exhI:"3B15", xlinkO:"3B2F"};
   var PMOD = {sas:"SASM", rail:"PCM", inj:"PCM", dpf:"PCM", egt:"PCM", batt:"PCM", fuel:"IPC"};
   PARAMS.forEach(function(p){ p.mod = PMOD[p.id] || GMOD[p.g] || ""; if(PDID[p.id]) p.did = PDID[p.id]; });
 
