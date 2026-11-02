@@ -4,9 +4,11 @@ members = [
   "crates/sdd-crypto",
   "crates/sdd-data",
   "crates/mongoose",
+  "crates/jlr-security",
   "tools/sdd-import",
   "tools/mongoose-bench",
   "tools/car-scan",
+  "tools/secalg-oracle",
 ]
 
 [workspace.package]

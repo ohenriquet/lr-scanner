@@ -1,0 +1,16 @@
+[package]
+name = "secalg-oracle"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "Oráculo 32 bits: chama a SecAlg.dll do SDD para gerar chaves de SecurityAccess (offline)."
+
+[[bin]]
+name = "secalg-oracle"
+path = "src/main.rs"
+
+[dependencies]
+libloading = "0.8.9"
+jlr-security = { path = "../../crates/jlr-security" }
+clap = { workspace = true }
+anyhow = { workspace = true }

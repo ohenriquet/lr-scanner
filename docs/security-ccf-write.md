@@ -54,11 +54,12 @@ Referências públicas (metodologia, não a chave da JLR):
 
 ## Pendências antes de qualquer gravação
 
-- Extrair o algoritmo ID 0 exato da `SecAlg.dll` (em andamento, Ghidra).
+- [x] Algoritmo extraído: `GetSecurityCodeISO14229` (LFSR init 0xC541A9, poly
+  0x109028, 64 iterações). Implementado no crate `jlr-security`.
 - Reconstruir o checksum do CCF (CHECKSUM_CCF_EUCD) — provável nas DLLs de CCF.
-- VALIDAR a chave contra uma troca real antes de enviar (evitar lockout):
-  idealmente capturar o SDD fazendo 0x27 neste BCM via shim J2534, ou aceitar
-  o risco de 1 tentativa com o algoritmo bem conferido.
+- [x] Gerador VALIDADO contra a `SecAlg.dll` do próprio SDD (export
+  `SECALG_GetSecurityKey`, algoritmo 32, semente de 3 bytes): 12/12 sementes
+  produzem chave idêntica. Oráculo 32 bits em `tools/secalg-oracle`.
 - Fazer sempre backup do CCF antes (já temos um) e ter plano de restauração.
 
 ## Segurança do procedimento
