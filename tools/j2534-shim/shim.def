@@ -1,0 +1,16 @@
+LIBRARY monpj_shim
+EXPORTS
+    PassThruOpen
+    PassThruClose
+    PassThruConnect
+    PassThruDisconnect
+    PassThruReadMsgs
+    PassThruWriteMsgs
+    PassThruStartPeriodicMsg
+    PassThruStopPeriodicMsg
+    PassThruStartMsgFilter
+    PassThruStopMsgFilter
+    PassThruSetProgrammingVoltage
+    PassThruReadVersion
+    PassThruGetLastError
+    PassThruIoctl

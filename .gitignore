@@ -31,3 +31,7 @@ app/android/app/.cxx/
 keymat*.json
 *_decompiled*
 SecAlg*.c*
+
+# shim compilado e capturas
+tools/j2534-shim/monpj_shim.dll
+captures/
