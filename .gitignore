@@ -43,3 +43,6 @@ app/jlr_app/assets/car/*.jpg
 app/jlr_app/assets/pack.json
 # Bibliotecas nativas compiladas (geradas por cargo/cargo-ndk)
 app/jlr_app/android/app/src/main/jniLibs/
+
+# Backups de CCF do carro (VIN/dados do veículo) — nunca versionar
+/backups/
