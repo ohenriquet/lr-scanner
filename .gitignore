@@ -41,3 +41,5 @@ app/assets/car/*.jpg
 app/jlr_app/assets/car/*.jpg
 # Pacote exportado (derivado da instalação JLR): gerar com sdd-import pack-export
 app/jlr_app/assets/pack.json
+# Bibliotecas nativas compiladas (geradas por cargo/cargo-ndk)
+app/jlr_app/android/app/src/main/jniLibs/

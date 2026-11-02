@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptador Drew Technologies Mongoose Pro JLR (J2534). -->
+<resources>
+    <!-- VID 0x18E1 = 6369, PID 0x0104 = 260 (em decimal, como o Android exige). -->
+    <usb-device vendor-id="6369" product-id="260" />
+</resources>
