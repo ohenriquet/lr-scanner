@@ -25,6 +25,9 @@ class CarState extends ChangeNotifier {
   Map<String, List<(String, int)>> activeDtcs = {};
   bool reading = false;
 
+  /// Imagem do CCF lida do BCM (DID 0xDE00), ou null se não lida.
+  List<int>? ccfImage;
+
   // ─── live ───
   // chave "MODULO|DID" -> (módulo, parâmetro)
   final Map<String, (Module, LiveParam)> _watched = {};
@@ -82,6 +85,11 @@ class CarState extends ChangeNotifier {
     _demoSample('RLM', '0x3B04', 0.004, '0.00 m');
     _demoSample('PCM', '0x0314', 11.4, '11.4 g/s');
     _demoSample('PCM', '0x0301', 1.31, '1.31 V');
+    // CCF de exemplo: liga a luz de acesso (byte 47 = 4) e a puddle (282 = 2).
+    final img = List<int>.filled(1024, 0);
+    img[47] = 0x04; // approach lamp "De série"
+    img[196 + 86] = 0x02; // puddle "Luzes de cortesia"
+    ccfImage = img;
     notifyListeners();
   }
 
@@ -115,12 +123,45 @@ class CarState extends ChangeNotifier {
         ..clear()
         ..addAll(present.map((e) => e[0].toString()));
       activeDtcs = await link.dtcs(present);
+      await readCcf();
     } catch (e) {
       connectError = '$e';
     } finally {
       reading = false;
       notifyListeners();
     }
+  }
+
+  /// Lê o CCF do BCM (DID 0xDE00) via a mesma leitura 0x22 usada nos DIDs.
+  Future<void> readCcf() async {
+    final bcms = pack.modules.where((m) => m.acronym == 'BCM');
+    if (bcms.isEmpty) return;
+    final bcm = bcms.first;
+    if (bcm.tx == null || bcm.rx == null) return;
+    final hex = await link.readMany([
+      [bcm.tx!, bcm.rx!, 0xDE00]
+    ]).then((m) => m['${bcm.tx}:${bcm.rx}:${0xDE00}']);
+    if (hex == null || hex.length < 2) return;
+    final bytes = <int>[];
+    for (var i = 0; i + 1 < hex.length; i += 2) {
+      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    }
+    ccfImage = bytes;
+  }
+
+  /// Decodifica um parâmetro do CCF: (valor cru mascarado, rótulo da opção).
+  (int?, String) decodeCcf(CcfParam p) {
+    final img = ccfImage;
+    if (img == null) return (null, '—');
+    final base = pack.ccf.blockBase[p.block];
+    if (base == null) return (null, '—');
+    final off = base + p.byteStart;
+    if (off < 0 || off >= img.length) return (null, '—');
+    final raw = img[off] & p.mask;
+    for (final o in p.options) {
+      if ((o.value & p.mask) == raw) return (raw, o.label);
+    }
+    return (raw, '0x${raw.toRadixString(16).padLeft(2, '0')}');
   }
 
   void disconnect() {
@@ -133,6 +174,7 @@ class CarState extends ChangeNotifier {
     online.clear();
     activeDtcs = {};
     vin = null;
+    ccfImage = null;
     notifyListeners();
   }
 

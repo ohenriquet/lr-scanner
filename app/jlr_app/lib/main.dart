@@ -67,7 +67,7 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     final q = Uri.base.queryParameters;
     final t = int.tryParse(q['tab'] ?? '');
-    if (t != null && t >= 0 && t <= 2) _tab = t;
+    if (t != null && t >= 0 && t <= 3) _tab = t;
     _initialQuery = q['q'];
     _demo = q['demo'] == '1';
   }
@@ -76,6 +76,7 @@ class _HomeShellState extends State<HomeShell> {
     (Icons.dashboard_outlined, Icons.dashboard, 'Painel'),
     (Icons.show_chart_outlined, Icons.show_chart, 'Ao vivo'),
     (Icons.error_outline, Icons.error, 'Falhas'),
+    (Icons.tune_outlined, Icons.tune, 'Config'),
   ];
 
   @override
@@ -111,6 +112,7 @@ class _HomeShellState extends State<HomeShell> {
           PainelScreen(pack: pack, car: car),
           LiveScreen(pack: pack, car: car),
           FalhasScreen(pack: pack, car: car, initialQuery: _initialQuery),
+          ConfigScreen(pack: pack, car: car, initialQuery: _initialQuery),
         ];
         final wide = MediaQuery.sizeOf(context).width >= 820;
 

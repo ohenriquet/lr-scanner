@@ -611,3 +611,197 @@ class _FalhasScreenState extends State<FalhasScreen> {
         ],
       );
 }
+
+// ───────────────────────────── Config (CCF) ─────────────────────────────
+
+class ConfigScreen extends StatefulWidget {
+  final Pack pack;
+  final CarState car;
+  final String? initialQuery;
+  const ConfigScreen(
+      {super.key, required this.pack, required this.car, this.initialQuery});
+  @override
+  State<ConfigScreen> createState() => _ConfigScreenState();
+}
+
+class _ConfigScreenState extends State<ConfigScreen> {
+  bool _advanced = false;
+  late String _query = widget.initialQuery ?? '';
+  late final _ctrl = TextEditingController(text: widget.initialQuery ?? '');
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+      listenable: widget.car, builder: (context, _) => _body(context));
+
+  Widget _body(BuildContext context) {
+    final car = widget.car;
+    final q = _query.trim().toLowerCase();
+    final params = widget.pack.ccf.params.where((p) {
+      if (!_advanced && !p.display && q.isEmpty) return false;
+      if (q.isEmpty) return true;
+      return p.label.toLowerCase().contains(q) ||
+          p.groupLabel.toLowerCase().contains(q) ||
+          p.name.toLowerCase().contains(q);
+    }).toList();
+
+    // agrupa por groupLabel preservando ordem
+    final groups = <String, List<CcfParam>>{};
+    for (final p in params) {
+      groups.putIfAbsent(p.groupLabel, () => []).add(p);
+    }
+
+    return _Content(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  car.ccfImage != null
+                      ? 'Configuração (CCF) lida do BCM. Visualização; a gravação '
+                          'no BCM depende de um mecanismo ainda não liberado.'
+                      : 'Configuração (CCF) do veículo. Conecte para ler os valores '
+                          'atuais. A gravação ainda não está disponível.',
+                  style: TextStyle(fontSize: 11.5, color: C.ink3),
+                ),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _ctrl,
+                      onChanged: (v) => setState(() => _query = v),
+                      style: const TextStyle(fontSize: 14),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Filtrar opções (ex.: luz, alarme)…',
+                        hintStyle: TextStyle(color: C.ink3),
+                        filled: true,
+                        fillColor: C.panel2,
+                        prefixIcon: const Icon(Icons.search, size: 18),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                          borderSide: const BorderSide(color: C.line),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                          borderSide: const BorderSide(color: C.line),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Mostrar opções avançadas (ocultas no SDD)',
+                    child: Row(children: [
+                      Text('Avançadas',
+                          style: TextStyle(fontSize: 12, color: C.ink2)),
+                      Switch(
+                        value: _advanced,
+                        onChanged: (v) => setState(() => _advanced = v),
+                      ),
+                    ]),
+                  ),
+                ]),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              children: [
+                for (final e in groups.entries) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(2, 10, 2, 6),
+                    child: Text(e.key.toUpperCase(),
+                        style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            color: C.accent)),
+                  ),
+                  Card(
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < e.value.length; i++) ...[
+                          if (i > 0) const Divider(height: 1, color: C.line),
+                          _ccfRow(car, e.value[i]),
+                        ]
+                      ],
+                    ),
+                  ),
+                ],
+                if (groups.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: Center(
+                        child: Text('Nada encontrado.',
+                            style: TextStyle(color: C.ink3))),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _ccfRow(CarState car, CcfParam p) {
+    final (_, current) = car.decodeCcf(p);
+    final known = car.ccfImage != null && current != '—';
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+        title: Text(p.label, style: const TextStyle(fontSize: 13.5)),
+        subtitle: Text(p.name,
+            style: C.mono.copyWith(fontSize: 10.5, color: C.ink3)),
+        trailing: Text(
+          current,
+          style: TextStyle(
+              color: known ? C.accent : C.ink3,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        children: [
+          for (final o in p.options)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                Icon(
+                  known && current == o.label
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  size: 16,
+                  color: known && current == o.label ? C.accent : C.ink3,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(o.label,
+                      style: TextStyle(fontSize: 12.5, color: C.ink2)),
+                ),
+                Text('0x${o.value.toRadixString(16).padLeft(2, '0')}',
+                    style: C.mono.copyWith(fontSize: 10.5, color: C.ink3)),
+              ]),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'bloco ${p.block} · byte ${p.byteStart} · máscara 0x${p.mask.toRadixString(16)}'
+              '${p.editable ? "" : " · não editável no SDD"}',
+              style: TextStyle(fontSize: 10.5, color: C.ink3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

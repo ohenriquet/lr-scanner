@@ -321,12 +321,78 @@ fn cmd_pack_export(pack: &std::path::Path, out: &std::path::Path) -> Result<()> 
             .push(Value::String(text));
     }
 
+    // ccf: offset de cada bloco na imagem do DID + parâmetros exibíveis.
+    let base_addr: i64 = conn
+        .query_row(
+            "SELECT MIN(start_address) FROM ccf_address WHERE module LIKE 'BCM%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let mut block_base: Map<String, Value> = Map::new();
+    {
+        let mut st = conn.prepare(
+            "SELECT block_id, MIN(start_address) FROM ccf_address
+             WHERE module LIKE 'BCM%' AND start_address IS NOT NULL GROUP BY block_id",
+        )?;
+        for row in st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+            .filter_map(|r| r.ok())
+        {
+            block_base.insert(row.0, Value::from(row.1 - base_addr));
+        }
+    }
+    let mut ccf_params = Vec::new();
+    {
+        let mut st = conn.prepare(
+            "SELECT id, block_id, grp, name, title, byte_start, mask, ptype, editable, display
+             FROM ccf_param ORDER BY grp, name",
+        )?;
+        let rows: Vec<(i64, String, Option<String>, String, Option<String>, i64, Option<i64>, Option<String>, i64, i64)> =
+            st.query_map([], |r| {
+                Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?,
+                    r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        for (id, block_id, grp, name, title, byte_start, mask, ptype, editable, display) in rows {
+            let mut os = conn.prepare(
+                "SELECT value, name, label FROM ccf_option WHERE param_id = ?1 ORDER BY value",
+            )?;
+            let options: Vec<Value> = os
+                .query_map([id], |r| {
+                    Ok(json!({
+                        "value": r.get::<_, i64>(0)?,
+                        "name": r.get::<_, Option<String>>(1)?,
+                        "label": r.get::<_, Option<String>>(2)?,
+                    }))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            ccf_params.push(json!({
+                "block": block_id,
+                "grp": grp,
+                "name": name,
+                "title": title,
+                "byte_start": byte_start,
+                "mask": mask,
+                "ptype": ptype,
+                "editable": editable != 0,
+                "display": display != 0,
+                "options": options,
+            }));
+        }
+    }
+
     let doc = json!({
         "vehicle": vehicle,
         "modules": modules,
         "live": live,
         "dtc_text": dtc_text,
         "dtc_help": dtc_help,
+        "ccf": { "block_base": block_base, "params": ccf_params },
     });
     let s = serde_json::to_string(&doc)?;
     std::fs::write(out, &s).with_context(|| format!("gravar {}", out.display()))?;

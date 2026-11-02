@@ -12,6 +12,7 @@ class Pack {
   final Map<String, List<LiveParam>> live; // módulo -> parâmetros
   final Map<String, String> dtcText; // código -> descrição
   final Map<String, Map<String, DtcHelp>> dtcHelp; // código -> módulo -> help
+  final Ccf ccf;
 
   Pack({
     required this.vehicle,
@@ -19,6 +20,7 @@ class Pack {
     required this.live,
     required this.dtcText,
     required this.dtcHelp,
+    required this.ccf,
   });
 
   static Future<Pack> load() async {
@@ -56,6 +58,7 @@ class Pack {
       live: live,
       dtcText: dtcText,
       dtcHelp: dtcHelp,
+      ccf: Ccf.fromJson(j['ccf'] as Map<String, dynamic>?),
     );
   }
 
@@ -148,6 +151,82 @@ class LiveParam {
     }
     return unit ?? '';
   }
+}
+
+/// Configuração do veículo (CCF): offsets de bloco + parâmetros editáveis.
+class Ccf {
+  final Map<String, int> blockBase; // block_id -> offset na imagem do DID
+  final List<CcfParam> params;
+  const Ccf({required this.blockBase, required this.params});
+
+  factory Ccf.fromJson(Map<String, dynamic>? j) {
+    if (j == null) return const Ccf(blockBase: {}, params: []);
+    final bb = <String, int>{};
+    (j['block_base'] as Map<String, dynamic>? ?? const {})
+        .forEach((k, v) => bb[k] = (v as num).toInt());
+    final ps = (j['params'] as List? ?? const [])
+        .map((p) => CcfParam.fromJson(p as Map<String, dynamic>))
+        .toList();
+    return Ccf(blockBase: bb, params: ps);
+  }
+}
+
+class CcfParam {
+  final String block;
+  final String? grp;
+  final String name;
+  final String? title;
+  final int byteStart;
+  final int mask;
+  final bool display;
+  final bool editable;
+  final List<CcfOption> options;
+
+  CcfParam({
+    required this.block,
+    this.grp,
+    required this.name,
+    this.title,
+    required this.byteStart,
+    required this.mask,
+    required this.display,
+    required this.editable,
+    required this.options,
+  });
+
+  factory CcfParam.fromJson(Map<String, dynamic> j) => CcfParam(
+        block: j['block'].toString(),
+        grp: j['grp'] as String?,
+        name: j['name'] as String,
+        title: j['title'] as String?,
+        byteStart: (j['byte_start'] as num).toInt(),
+        mask: (j['mask'] as num?)?.toInt() ?? 0xFF,
+        display: j['display'] as bool? ?? false,
+        editable: j['editable'] as bool? ?? false,
+        options: (j['options'] as List? ?? const [])
+            .map((o) => CcfOption.fromJson(o as Map<String, dynamic>))
+            .toList(),
+      );
+
+  String get label => (title != null && title!.isNotEmpty) ? title! : name;
+
+  /// Rótulo amigável do grupo (ex.: "Exterior lights").
+  String get groupLabel {
+    var g = (grp ?? '').replaceFirst('GROUP_CCF_', '').replaceFirst('GROUP_', '');
+    g = g.replaceAll('EUCD_', '').replaceAll('_', ' ').trim().toLowerCase();
+    if (g.isEmpty) return 'Outros';
+    return g[0].toUpperCase() + g.substring(1);
+  }
+}
+
+class CcfOption {
+  final int value;
+  final String label;
+  const CcfOption(this.value, this.label);
+  factory CcfOption.fromJson(Map<String, dynamic> j) => CcfOption(
+        (j['value'] as num).toInt(),
+        (j['label'] as String?) ?? (j['name'] as String?) ?? '0x${j['value']}',
+      );
 }
 
 class DtcHelp {
