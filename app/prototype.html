@@ -219,6 +219,16 @@
 
   .split { display: grid; grid-template-columns: 1fr; gap: 14px; }
 
+  /* car illustration */
+  .carcard { padding: 14px 16px; display: grid; gap: 12px; }
+  .carstage { position: relative; display: grid; place-items: center; padding: 6px 0; }
+  .carstage svg { width: 100%; max-width: 460px; height: auto; }
+  .carcolors { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+  .colorchip { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; position: relative; }
+  .colorchip[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  .colorname { font-size: 12px; color: var(--ink-2); font-family: var(--mono); }
+  .carfloor { width: 70%; height: 10px; margin: -6px auto 0; border-radius: 50%; background: radial-gradient(ellipse at center, #0007, transparent 70%); }
+
   /* tablet / desktop */
   @media (min-width: 820px) {
     nav.tabs { display: none; }
@@ -296,10 +306,58 @@
             </div>
           </div>
 
+          <div class="card carcard">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h2 class="sec" style="margin:0">Seu veículo</h2>
+              <div class="grow" style="flex:1"></div>
+              <span class="colorname" id="colorName">Indus Silver</span>
+            </div>
+            <div class="carstage" id="carStage"></div>
+            <div class="carfloor"></div>
+            <div class="carcolors" id="carColors"></div>
+            <div style="font-size:11.5px;color:var(--ink-3)">
+              A cor vem do registro de fabricação (Topix) pelo VIN, não do VIN em si. Escolha a sua para deixar fiel.
+            </div>
+          </div>
+
           <div>
             <h2 class="sec">Módulos</h2>
             <div class="mods" id="mods"></div>
           </div>
+        </section>
+
+        <!-- TESTES -->
+        <section class="view" id="v-test" hidden>
+          <div class="notice">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            Testes de atuador movem peças reais do carro. No app real, cada um pede confirmação, checa pré-condições (ignição, motor, rodas) e tem parada de emergência. Protótipo: nada é enviado.
+          </div>
+          <div>
+            <h2 class="sec">Funções de serviço</h2>
+            <div class="grid" id="svcFns" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px"></div>
+          </div>
+          <div>
+            <h2 class="sec">Controle de atuadores · Suspensão a ar (RLM)</h2>
+            <div class="card" id="actList"></div>
+          </div>
+          <div>
+            <h2 class="sec">Controle de atuadores · outros módulos</h2>
+            <div class="card" id="actList2"></div>
+          </div>
+        </section>
+
+        <!-- MANUTENÇÃO -->
+        <section class="view" id="v-maint" hidden>
+          <div>
+            <h2 class="sec">Resets e registros na ECU</h2>
+            <div class="card" id="maintFns"></div>
+          </div>
+          <div class="toolbar">
+            <h2 class="sec" style="margin:0">Histórico de manutenção</h2>
+            <div class="grow"></div>
+            <button class="btn accent" id="addMaint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Registrar</button>
+          </div>
+          <div class="card" id="maintLog"></div>
         </section>
 
         <!-- LIVE DATA -->
@@ -385,6 +443,8 @@
   var NAV = [
     { id: "dash", label: "Painel", icon: '<path d="M3 13h8V3H3v10zm10 8h8V3h-8v18zM3 21h8v-6H3v6z"/>' },
     { id: "live", label: "Ao vivo", icon: '<path d="M3 12h4l2 5 4-12 2 7h6"/>' },
+    { id: "test", label: "Testes", icon: '<path d="M9 2v6l-5 9a2 2 0 0 0 1.8 3h12.4A2 2 0 0 0 20 17l-5-9V2"/><path d="M8 2h8M7 15h10"/>' },
+    { id: "maint",label: "Manut.", icon: '<path d="M14.7 6.3a4 4 0 0 1-5 5L4 17a2.1 2.1 0 1 0 3 3l5.7-5.7a4 4 0 0 1 5-5l-2.5 2.5-2-2 2.5-2.5z"/>' },
     { id: "dtc",  label: "Falhas", icon: '<path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>' },
     { id: "cfg",  label: "Config", icon: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6h.1A1.6 1.6 0 0 0 9 1.1V1a2 2 0 0 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1h.1a2 2 0 0 1 0 4H23a1.6 1.6 0 0 0-1.6 1z"/>' }
   ];
@@ -465,8 +525,25 @@
     { id:"fuel",  g:"Elétrico", label:"Nível combustível", unit:"%", min:0, max:100, read:function(t){return 68-t*0.002;} },
     { id:"vss",   g:"Chassi", label:"Velocidade", unit:"km/h", min:0, max:200, read:function(){return 0;} },
     { id:"sas",   g:"Chassi", label:"Ângulo de direção", unit:"°", min:-540, max:540, read:function(t){return Math.sin(t/8)*4;} },
-    { id:"height",g:"Chassi", label:"Altura susp. diant. E", unit:"mm", min:-40, max:80, read:function(t){return 2+Math.sin(t/15)*0.6;} }
+    { id:"yaw",   g:"Chassi", label:"Taxa de guinada", unit:"°/s", min:-75, max:75, read:function(t){return Math.sin(t/6)*0.8;} },
+    { id:"latg",  g:"Chassi", label:"Aceleração lateral", unit:"g", min:-1.5, max:1.5, read:function(t){return Math.sin(t/6)*0.02;} },
+    { id:"brake", g:"Chassi", label:"Pressão de freio", unit:"bar", min:0, max:200, read:function(t){return 0.5+Math.max(0,Math.sin(t/17))*1.0;} },
+    // ---- Suspensão a ar (RLM) ----
+    { id:"resP",  g:"Suspensão a ar", label:"Pressão do reservatório", unit:"bar", min:0, max:20, read:function(t){return 12.6+Math.sin(t/35)*0.4-(t%70>60?0.5:0);} },
+    { id:"compP", g:"Suspensão a ar", label:"Pressão saída compressor", unit:"bar", min:0, max:25, read:function(t){var r=t%70; return r>58&&r<66 ? 14+Math.sin(t*2)*1.5 : 0.1;} },
+    { id:"compT", g:"Suspensão a ar", label:"Temp. do compressor", unit:"°C", min:0, max:200, read:warm(32,70,220) },
+    { id:"compDuty",g:"Suspensão a ar", label:"Ciclo do compressor", unit:"%", min:0, max:100, read:function(t){var r=t%70; return r>58&&r<66?100:0;} },
+    { id:"hFL",   g:"Suspensão a ar", label:"Altura dianteira esquerda", unit:"mm", min:-50, max:90, read:corner(2.0,0.6,0) },
+    { id:"hFR",   g:"Suspensão a ar", label:"Altura dianteira direita", unit:"mm", min:-50, max:90, read:corner(1.4,0.6,1.1) },
+    { id:"hRL",   g:"Suspensão a ar", label:"Altura traseira esquerda", unit:"mm", min:-50, max:90, read:corner(3.1,0.7,2.3) },
+    { id:"hRR",   g:"Suspensão a ar", label:"Altura traseira direita", unit:"mm", min:-50, max:90, read:corner(2.6,0.7,0.7) },
+    { id:"hTgt",  g:"Suspensão a ar", label:"Altura alvo (modo atual)", unit:"mm", min:-50, max:90, read:function(){return 0;} },
+    { id:"vFL",   g:"Suspensão a ar", label:"Solenoide diant. esq.", unit:"", min:0, max:1, read:function(){return 0;} },
+    { id:"vFR",   g:"Suspensão a ar", label:"Solenoide diant. dir.", unit:"", min:0, max:1, read:function(){return 0;} },
+    { id:"vRL",   g:"Suspensão a ar", label:"Solenoide tras. esq.", unit:"", min:0, max:1, read:function(){return 0;} },
+    { id:"vRR",   g:"Suspensão a ar", label:"Solenoide tras. dir.", unit:"", min:0, max:1, read:function(){return 0;} }
   ];
+  function corner(base,amp,ph){ return function(t){ return base+Math.sin(t/16+ph)*amp*0.4+(Math.random()-.5)*0.3; }; }
   function warm(a,b,tau){ return function(t){ return (b-(b-a)*Math.exp(-t/tau))+(Math.random()-.5)*0.6; }; }
 
   var WINDOW = 60, HZ = 4, MODE = "stack", PLAYING = true;
@@ -770,7 +847,189 @@
     bx.appendChild(b); ov.appendChild(bx); ov.onclick=function(e){ if(e.target===ov) ov.remove(); }; document.body.appendChild(ov);
   }
 
+  /* ---------------- Car illustration + colour ---------------- */
+  var COLORS = [
+    ["Fuji White","#e9ebe9","#b9bcbb"], ["Indus Silver","#9ba1a5","#767c80"],
+    ["Corris Grey","#5a5f63","#44484b"], ["Santorini Black","#1b1e21","#0e1012"],
+    ["Loire Blue","#2d4a6b","#1d3350"], ["Baltic Blue","#3a6c9e","#285074"],
+    ["Firenze Red","#7c1a22","#5a0f16"], ["Kaikoura Stone","#b7b0a1","#938c7e"],
+    ["Nara Bronze","#5f5240","#443a2c"]
+  ];
+  function carSVG(){
+    return '<svg viewBox="0 0 470 196" xmlns="http://www.w3.org/2000/svg" aria-label="Land Rover Discovery 4">'
+      // shadow under body
+      + '<ellipse cx="235" cy="176" rx="200" ry="9" fill="#0003"/>'
+      // body (tintable)
+      + '<path fill="var(--carcol)" stroke="#0004" stroke-width="1.5" stroke-linejoin="round" d="'
+        + 'M22 150 L22 112 Q22 104 31 101 L96 90 L120 58 Q124 50 134 49 L300 47 L314 33 Q318 29 326 29 '
+        + 'L430 30 Q442 31 444 44 L450 112 L452 132 Q452 150 436 150 L402 150 '
+        + 'A38 38 0 0 0 326 150 L170 150 A38 38 0 0 0 94 150 L40 150 Q22 150 22 150 Z"/>'
+      // roof highlight
+      + '<path fill="#fff" opacity=".10" d="M135 51 L300 49 L313 36 L428 37 L430 44 L314 43 L302 55 L137 57 Z"/>'
+      // windows
+      + '<path fill="#1b2730" stroke="#0005" d="M131 58 L154 61 L153 86 L116 88 Z"/>'          // windscreen
+      + '<path fill="#223039" stroke="#0005" d="M160 61 L214 60 L214 86 L160 86 Z"/>'            // front door
+      + '<path fill="#223039" stroke="#0005" d="M220 60 L286 59 L286 86 L220 86 Z"/>'            // rear door
+      + '<path fill="#1b2730" stroke="#0005" d="M292 59 L320 50 L336 51 L336 86 L292 86 Z"/>'    // quarter + stadium step
+      + '<rect x="214.5" y="60" width="5" height="26" fill="var(--carcol)"/>'                      // B-pillar
+      // belt line + door handles
+      + '<path stroke="#0003" stroke-width="2" d="M118 92 L300 90"/>'
+      + '<rect x="182" y="96" width="16" height="4" rx="2" fill="#0004"/>'
+      + '<rect x="250" y="96" width="16" height="4" rx="2" fill="#0004"/>'
+      + '<path stroke="#0003" stroke-width="1.5" d="M216 60 L216 150 M158 88 L158 150 M290 88 L290 150"/>' // door cuts
+      // sill
+      + '<rect x="40" y="138" width="390" height="8" rx="3" fill="#0003"/>'
+      // lights
+      + '<rect x="24" y="104" width="12" height="16" rx="3" fill="#e9eef2" opacity=".85"/>'        // headlight
+      + '<rect x="438" y="104" width="10" height="20" rx="3" fill="#e0574e"/>'                     // taillight
+      // wheels
+      + wheel(132,150) + wheel(364,150)
+      + '</svg>';
+  }
+  function wheel(cx,cy){
+    return '<g>'
+      + '<circle cx="'+cx+'" cy="'+cy+'" r="38" fill="#15181b"/>'
+      + '<circle cx="'+cx+'" cy="'+cy+'" r="37" fill="none" stroke="#000" stroke-width="2"/>'
+      + '<circle cx="'+cx+'" cy="'+cy+'" r="19" fill="#c4cace"/>'
+      + '<circle cx="'+cx+'" cy="'+cy+'" r="19" fill="none" stroke="#888" stroke-width="1"/>'
+      + '<circle cx="'+cx+'" cy="'+cy+'" r="5" fill="#2a2e31"/>'
+      + spokes(cx,cy) + '</g>';
+  }
+  function spokes(cx,cy){ var s=""; for(var i=0;i<5;i++){ var a=i/5*Math.PI*2; s+='<line x1="'+(cx+Math.cos(a)*6)+'" y1="'+(cy+Math.sin(a)*6)+'" x2="'+(cx+Math.cos(a)*18)+'" y2="'+(cy+Math.sin(a)*18)+'" stroke="#9aa0a4" stroke-width="3"/>'; } return s; }
+  var carStage=$("#carStage"), carColors=$("#carColors"), colorName=$("#colorName");
+  var CARIDX=1;
+  function paintCar(){
+    carStage.style.setProperty("--carcol", COLORS[CARIDX][1]);
+    carStage.innerHTML=carSVG();
+    colorName.textContent=COLORS[CARIDX][0];
+    carColors.querySelectorAll("button").forEach(function(b,i){ b.setAttribute("aria-pressed", i===CARIDX?"true":"false"); });
+  }
+  COLORS.forEach(function(c,i){ var b=document.createElement("button"); b.className="colorchip"; b.style.background=c[1];
+    b.title=c[0]; b.setAttribute("aria-label",c[0]); b.onclick=function(){ CARIDX=i; paintCar(); try{localStorage.setItem("jlr_color",i);}catch(e){} }; carColors.appendChild(b); });
+  try{ var sc=localStorage.getItem("jlr_color"); if(sc!=null) CARIDX=+sc; }catch(e){}
+
+  /* ---------------- Testes: funções de serviço ---------------- */
+  var SVCFN = [
+    ["Regeneração dinâmica do DPF","PCM","73670","Queima a fuligem do filtro com o motor controlado.","0x31 rotina + monitor EGT/fuligem"],
+    ["Substituição do DPF","PCM","73680","Zera os contadores após trocar o filtro.","0x31 rotina + 0x2E contadores"],
+    ["Correção dos injetores (IQA)","PCM","73840","Lê e grava os códigos de calibração dos injetores.","0x22/0x2E por injetor"],
+    ["Teste de compressão relativa","PCM","—","Compara contribuição de cada cilindro.","0x31 rotina"],
+    ["Teste/limpeza da válvula EGR","PCM","—","Aciona e verifica a EGR.","0x2F controle de saída"],
+    ["Sangria do ABS","ABS","62510","Ciclo das válvulas para purgar o ar do sistema.","0x31 rotina + bomba/válvulas"],
+    ["Calibração do sensor de ângulo (SAS)","SASM","62520","Zera o ângulo de direção.","0x31 rotina (volante centrado)"],
+    ["Freio de estacionamento: modo serviço","PBM","—","Recolhe as pinças para troca de pastilhas.","0x31 entrar/sair de serviço"],
+    ["Calibração de altura da suspensão","RLM","66030","Define as alturas de referência por canto.","0x31 + alturas alvo"],
+    ["Esvaziar suspensão (modo serviço)","RLM","66050","Alivia o ar para elevar no macaco.","0x31 rotina"],
+    ["Reset do monitor de bateria","PCM","72030","Informa a troca de bateria ao BMS.","0x31 rotina"],
+    ["Codificação de módulo novo","vários","41xxx","Configura um módulo recém-instalado via CCF.","sequência CCF"]
+  ];
+  var svcFns=$("#svcFns");
+  SVCFN.forEach(function(s){
+    var c=document.createElement("div"); c.className="card pad2"; c.style.cssText="display:flex;flex-direction:column;gap:7px";
+    c.innerHTML='<div style="display:flex;align-items:center;gap:8px"><b style="font-size:13.5px">'+s[0]+'</b><span class="chip" style="margin-left:auto">'+s[1]+'</span></div>'+
+      '<div style="font-size:12px;color:var(--ink-3)">'+s[3]+'</div>'+
+      '<div style="font-family:var(--mono);font-size:10.5px;color:var(--ink-3)">'+s[4]+'</div>';
+    var b=document.createElement("button"); b.className="btn accent"; b.style.marginTop="4px"; b.textContent="Iniciar";
+    b.onclick=function(){ alertBox("Função de serviço: "+s[0]+" ("+s[1]+(s[2]!=="—"?" · "+s[2]:"")+")\n\nNo app real: checa pré-condições, roda a sequência ("+s[4]+") com progresso ao vivo e permite abortar.\n\n(Protótipo: nada enviado.)"); };
+    c.appendChild(b); svcFns.appendChild(c);
+  });
+
+  /* ---------------- Testes: controle de atuadores ---------------- */
+  var ACT_RLM = [
+    ["Relé do compressor","pulse"], ["Válvula do reservatório","toggle"],
+    ["Válvula de exaustão (alívio)","toggle"],
+    ["Solenoide dianteiro esquerdo","pulse"], ["Solenoide dianteiro direito","pulse"],
+    ["Solenoide traseiro esquerdo","pulse"], ["Solenoide traseiro direito","pulse"]
+  ];
+  var ACT_OTHER = [
+    ["BCM","Luz de cortesia dos espelhos (puddle)","toggle"],
+    ["BCM","Buzina","pulse"], ["BCM","Pisca-alertas","toggle"],
+    ["BCM","Lâmpadas de leitura internas","toggle"],
+    ["DDM","Travar/destravar portas","pulse"],
+    ["HVAC","Motor do soprador (100%)","toggle"]
+  ];
+  function renderActuators(host, arr, withModule){
+    host.innerHTML="";
+    arr.forEach(function(a){
+      var mod = withModule? a[0] : "RLM";
+      var name = withModule? a[1] : a[0];
+      var kind = withModule? a[2] : a[1];
+      var row=document.createElement("div"); row.className="cfg";
+      var ctrl = kind==="toggle"
+        ? '<button class="switch" role="switch" aria-checked="false"></button>'
+        : '<button class="btn">Pulsar</button>';
+      row.innerHTML='<div class="cl"><b>'+name+'</b><span>'+mod+' · 0x2F InputOutputControl</span></div>'+ctrl;
+      var btn=row.querySelector("button");
+      if(kind==="toggle"){ btn.onclick=function(){ var on=btn.getAttribute("aria-checked")!=="true"; btn.setAttribute("aria-checked",on); flash(name+(on?" LIGADO":" desligado")); }; }
+      else { btn.onclick=function(){ flash(name+" pulsado"); }; }
+      host.appendChild(row);
+    });
+  }
+  renderActuators($("#actList"), ACT_RLM, false);
+  renderActuators($("#actList2"), ACT_OTHER, true);
+
+  /* ---------------- Manutenção ---------------- */
+  var MAINT_FN = [
+    ["Reset do contador de óleo","PCM","73720","Zera a vida do óleo após a troca."],
+    ["Reset do intervalo de serviço","IPC","70100","Reinicia a contagem de km/tempo até a revisão."],
+    ["Registrar troca de óleo na ECU","PCM","—","Grava data e km da troca no registro de serviço."],
+    ["Reset do service após software","vários","—","Limpa pendências após atualização."]
+  ];
+  var maintFns=$("#maintFns");
+  MAINT_FN.forEach(function(m){
+    var row=document.createElement("div"); row.className="cfg";
+    row.innerHTML='<div class="cl"><b>'+m[0]+'</b><span>'+m[1]+(m[2]!=="—"?" · "+m[2]:"")+' — '+m[3]+'</span></div><button class="btn accent">Executar</button>';
+    row.querySelector("button").onclick=function(){ alertBox(m[0]+" ("+m[1]+")\n\nNo app real: 0x31 RoutineControl / 0x2E, com confirmação e verificação.\n\n(Protótipo: registrado só localmente abaixo quando aplicável.)");
+      if(m[0].indexOf("óleo")>=0){ addRecord({type:"Troca de óleo", odo:147291, date:today(), note:"Reset do contador (protótipo)"}); } };
+    maintFns.appendChild(row);
+  });
+  var LOG=[];
+  try{ LOG=JSON.parse(localStorage.getItem("jlr_maint")||"[]"); }catch(e){ LOG=[]; }
+  if(!LOG.length){ LOG=[
+    {type:"Troca de óleo e filtro", odo:142800, date:"2025-03-14", note:"5W-30 C1, filtro OEM"},
+    {type:"Filtro de ar + combustível", odo:142800, date:"2025-03-14", note:""},
+    {type:"Troca de óleo da caixa", odo:120000, date:"2023-11-02", note:"ZF 8HP"}
+  ]; }
+  var maintLog=$("#maintLog");
+  function renderLog(){
+    maintLog.innerHTML="";
+    if(!LOG.length){ maintLog.innerHTML='<div class="cfg" style="color:var(--ink-3)">Nenhum registro ainda.</div>'; return; }
+    LOG.slice().sort(function(a,b){return (b.odo||0)-(a.odo||0);}).forEach(function(r){
+      var row=document.createElement("div"); row.className="cfg";
+      row.innerHTML='<div class="cl"><b>'+r.type+'</b><span>'+(r.date||"")+' · '+(r.odo?r.odo.toLocaleString("pt-BR")+" km":"")+(r.note?" · "+r.note:"")+'</span></div>';
+      maintLog.appendChild(row);
+    });
+  }
+  function addRecord(r){ LOG.push(r); try{localStorage.setItem("jlr_maint",JSON.stringify(LOG));}catch(e){} renderLog(); flash("Manutenção registrada"); }
+  function today(){ var d=new Date(); return d.toISOString().slice(0,10); }
+  $("#addMaint").onclick=function(){ maintForm(); };
+
+  /* forms + toast */
+  function maintForm(){
+    var ov=mkOverlay();
+    var bx=document.createElement("div"); bx.className="card pad2"; bx.style.cssText="max-width:420px;width:100%;display:flex;flex-direction:column;gap:11px";
+    bx.innerHTML='<div style="font-weight:600;font-size:15px">Registrar manutenção</div>'+
+      field("Tipo","<select id='mf-type' class='sel' style='max-width:none;width:100%'>"+
+        ["Troca de óleo e filtro","Filtro de ar","Filtro de combustível","Troca de óleo da caixa","Fluido de freio","Correia/corrente","Pastilhas de freio","Suspensão a ar","Bateria","Outro"].map(function(o){return "<option>"+o+"</option>";}).join("")+"</select>")+
+      field("Quilometragem","<input id='mf-odo' class='psearch' inputmode='numeric' placeholder='147291' value='147291'>")+
+      field("Data","<input id='mf-date' class='psearch' type='date' value='"+today()+"'>")+
+      field("Observação","<input id='mf-note' class='psearch' placeholder='opcional'>");
+    var row=document.createElement("div"); row.style.cssText="display:flex;gap:9px;margin-top:4px";
+    var cancel=document.createElement("button"); cancel.className="btn"; cancel.textContent="Cancelar"; cancel.style.flex="1"; cancel.onclick=function(){ov.remove();};
+    var save=document.createElement("button"); save.className="btn accent"; save.textContent="Salvar"; save.style.flex="1";
+    save.onclick=function(){ addRecord({ type:$("#mf-type",bx).value, odo:parseInt(($("#mf-odo",bx).value||"0").replace(/\D/g,""),10)||0, date:$("#mf-date",bx).value, note:$("#mf-note",bx).value }); ov.remove(); };
+    row.appendChild(cancel); row.appendChild(save); bx.appendChild(row); ov.appendChild(bx); document.body.appendChild(ov);
+  }
+  function field(label,inner){ return "<label style='display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2)'>"+label+inner+"</label>"; }
+  function mkOverlay(){ var ov=document.createElement("div"); ov.style.cssText="position:fixed;inset:0;z-index:100;background:#0009;display:grid;place-items:center;padding:20px"; ov.onclick=function(e){ if(e.target===ov) ov.remove(); }; return ov; }
+  var toastEl=null, toastT=0;
+  function flash(msg){
+    if(!toastEl){ toastEl=document.createElement("div"); toastEl.style.cssText="position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:120;background:var(--panel-2);border:1px solid var(--accent);color:var(--ink);font-size:13px;padding:10px 16px;border-radius:10px;box-shadow:0 8px 24px #0006"; document.body.appendChild(toastEl); }
+    toastEl.textContent=msg; toastEl.style.opacity="1"; clearTimeout(toastT); toastT=setTimeout(function(){ if(toastEl) toastEl.style.opacity="0"; },1800);
+  }
+
   /* ---------------- boot ---------------- */
+  paintCar(); renderLog();
   renderPicker(""); syncLive(); renderDtc(); renderCfg();
   var start=(location.hash||"").replace("#","");
   go(NAV.some(function(n){return n.id===start;})?start:"dash");
