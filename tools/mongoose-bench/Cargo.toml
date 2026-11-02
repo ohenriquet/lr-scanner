@@ -1,0 +1,16 @@
+[package]
+name = "mongoose-bench"
+version.workspace = true
+edition.workspace = true
+license = "LGPL-2.1-or-later"
+description = "Utilitário de bancada para falar com o Mongoose Pro JLR por porta serial."
+
+[[bin]]
+name = "mongoose-bench"
+path = "src/main.rs"
+
+[dependencies]
+mongoose = { path = "../../crates/mongoose" }
+serialport = "4.7.0"
+clap = { workspace = true }
+anyhow = { workspace = true }
