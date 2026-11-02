@@ -1,0 +1,779 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>JLR OpenDiag</title>
+<style>
+  /* Layout: scanner de diagnóstico. Celular = barra inferior + coluna única;
+     tablet = trilho lateral + painel duplo. Tema escuro-primeiro (instrumento). */
+  :root {
+    color-scheme: dark;
+    --bg: #0d1014;
+    --panel: #151a21;
+    --panel-2: #1b222b;
+    --line: #273039;
+    --ink: #eef3f7;
+    --ink-2: #9fb0bf;
+    --ink-3: #647586;
+    --accent: #2fd3c6;      /* cyan instrumento */
+    --accent-dim: #16413f;
+    --good: #3ac17a;
+    --warn: #e5a93b;
+    --crit: #e5574e;
+    --info: #3987e5;
+    /* séries (palette validada, passo escuro) */
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #9085e9; --s7: #e66767; --s8: #c3c2b7;
+    --radius: 13px;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg: #eef1f4; --panel: #ffffff; --panel-2: #f3f6f9; --line: #d9e0e7;
+      --ink: #14202b; --ink-2: #4a5a68; --ink-3: #8295a5;
+      --accent: #0d9488; --accent-dim: #cdece9;
+      --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+      --s5: #e87ba4; --s6: #6250d6; --s7: #e34948; --s8: #52514e;
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #eef1f4; --panel: #ffffff; --panel-2: #f3f6f9; --line: #d9e0e7;
+    --ink: #14202b; --ink-2: #4a5a68; --ink-3: #8295a5;
+    --accent: #0d9488; --accent-dim: #cdece9;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --s5: #e87ba4; --s6: #6250d6; --s7: #e34948; --s8: #52514e;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); -webkit-font-smoothing: antialiased;
+    font-size: 14px; line-height: 1.45;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
+    background: var(--panel); z-index: 40;
+  }
+  .app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ---- Top bar ---- */
+  header {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 30;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px max(16px, env(safe-area-inset-right,0px)) 10px max(16px, env(safe-area-inset-left,0px));
+  }
+  .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .logo {
+    width: 30px; height: 30px; border-radius: 8px; flex: none;
+    background: linear-gradient(135deg, var(--accent), #1f8f86);
+    display: grid; place-items: center; color: #042; font-weight: 700;
+    box-shadow: 0 0 0 1px #0004 inset;
+  }
+  .logo svg { width: 18px; height: 18px; }
+  .brand b { font-size: 15px; letter-spacing: .2px; }
+  .brand span { color: var(--ink-3); font-size: 11px; }
+  .topspace { flex: 1 1 auto; }
+  .conn {
+    display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono);
+    font-size: 12px; padding: 5px 11px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--line); white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .dot.sim { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .iconbtn {
+    appearance: none; border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--ink-2); width: 34px; height: 34px; border-radius: 9px; cursor: pointer;
+    display: grid; place-items: center; flex: none;
+  }
+  .iconbtn:hover { color: var(--ink); border-color: var(--accent); }
+  .iconbtn svg { width: 17px; height: 17px; }
+
+  /* ---- Shell: rail (tablet) + content ---- */
+  .shell { display: flex; flex: 1 1 auto; min-height: 0; }
+  nav.rail { display: none; }
+  main { flex: 1 1 auto; min-width: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
+  .pad {
+    padding: 16px max(16px, env(safe-area-inset-right,0px)) 24px max(16px, env(safe-area-inset-left,0px));
+    max-width: 1500px; margin: 0 auto;
+  }
+
+  /* ---- Bottom tab bar (phone) ---- */
+  nav.tabs {
+    position: sticky; bottom: 0; z-index: 30; background: var(--panel);
+    border-top: 1px solid var(--line); display: flex;
+    padding: 6px max(6px, env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(6px, env(safe-area-inset-left,0px));
+  }
+  nav.tabs button {
+    flex: 1; appearance: none; background: none; border: 0; cursor: pointer;
+    color: var(--ink-3); font-family: var(--sans); font-size: 10.5px; font-weight: 600;
+    display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 2px; border-radius: 10px;
+  }
+  nav.tabs button svg { width: 21px; height: 21px; }
+  nav.tabs button[aria-selected="true"] { color: var(--accent); }
+  nav.tabs button[aria-selected="true"] svg { filter: drop-shadow(0 0 6px var(--accent)); }
+
+  /* ---- Generic ---- */
+  .view { display: flex; flex-direction: column; gap: 16px; }
+  h2.sec { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); margin: 2px 0; font-weight: 600; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .card.pad2 { padding: 16px; }
+  .grid { display: grid; gap: 12px; }
+
+  /* vehicle hero */
+  .hero { display: grid; grid-template-columns: 1fr; gap: 14px; padding: 16px; }
+  .vin { font-family: var(--mono); font-size: 20px; letter-spacing: 1.5px; color: var(--ink); }
+  .vrow { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--ink-2); font-size: 13px; }
+  .vrow b { color: var(--ink); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip { font-size: 11.5px; font-family: var(--mono); padding: 4px 9px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2); }
+
+  /* stat tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 13px 14px; display: flex; flex-direction: column; gap: 3px; position: relative; overflow: hidden; }
+  .tile .k { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; }
+  .tile .v { font-family: var(--mono); font-size: 25px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .u { font-size: 12px; color: var(--ink-2); }
+  .tile .spark { position: absolute; right: 0; bottom: 0; left: 0; height: 26px; opacity: .55; }
+
+  /* module grid */
+  .mods { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 10px; }
+  .mod { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 11px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .mod:hover { border-color: var(--accent); }
+  .mod .mstat { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .mod .mname { font-weight: 600; font-size: 13px; }
+  .mod .mdesc { font-size: 11px; color: var(--ink-3); }
+  .mod .mcount { margin-left: auto; font-family: var(--mono); font-size: 12px; padding: 2px 8px; border-radius: 999px; }
+  .mcount.ok { color: var(--good); background: #12351f; }
+  .mcount.bad { color: var(--crit); background: #3a1714; }
+  .mcount.off { color: var(--ink-3); background: var(--panel-2); }
+
+  /* live view */
+  .live { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button { appearance: none; background: none; border: 0; color: var(--ink-2); font-family: var(--sans); font-size: 12.5px; font-weight: 600; padding: 7px 12px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #042; }
+  .btn { appearance: none; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); font-family: var(--sans); font-weight: 600; font-size: 13px; padding: 8px 14px; border-radius: 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.accent { background: var(--accent); color: #042; border-color: transparent; }
+  .btn.warn { background: var(--crit); color: #fff; border-color: transparent; }
+  .btn svg { width: 15px; height: 15px; }
+  .grow { flex: 1 1 auto; }
+
+  .graphwrap { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; min-height: 260px; }
+  canvas.graph { width: 100%; display: block; touch-action: none; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 6px 4px 2px; }
+  .lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); font-family: var(--mono); }
+  .lg i { width: 11px; height: 3px; border-radius: 2px; }
+  .lg b { color: var(--ink); font-weight: 600; }
+
+  /* parameter picker */
+  .picker { display: flex; flex-direction: column; gap: 8px; }
+  .psearch { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--ink); font-family: var(--sans); font-size: 13px; padding: 9px 11px; }
+  .pgroup { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; margin: 6px 2px 2px; }
+  .plist { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; }
+  .prow { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); cursor: pointer; }
+  .prow:hover { border-color: var(--ink-3); }
+  .prow[data-on="1"] { border-color: var(--sw); background: color-mix(in srgb, var(--sw) 9%, var(--panel)); }
+  .prow .swatch { width: 12px; height: 12px; border-radius: 4px; flex: none; background: var(--sw); opacity: .35; }
+  .prow[data-on="1"] .swatch { opacity: 1; }
+  .prow .pl { flex: 1 1 auto; min-width: 0; }
+  .prow .pl b { font-weight: 600; font-size: 13px; display: block; }
+  .prow .pl span { font-size: 11px; color: var(--ink-3); }
+  .prow .pv { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
+  .prow .pv small { color: var(--ink-3); font-size: 10px; }
+
+  /* DTC list */
+  .dtc { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .dtc:last-child { border-bottom: 0; }
+  .dtc .code { font-family: var(--mono); font-size: 14px; font-weight: 600; min-width: 74px; }
+  .dtc .ddesc { flex: 1 1 auto; min-width: 0; }
+  .dtc .ddesc b { font-weight: 600; }
+  .dtc .ddesc span { display: block; font-size: 12px; color: var(--ink-3); }
+  .badge { font-size: 10.5px; font-family: var(--mono); padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
+  .badge.conf { background: #3a1714; color: var(--crit); }
+  .badge.pend { background: #3a3014; color: var(--warn); }
+  .badge.hist { background: var(--panel-2); color: var(--ink-3); }
+  .modhead { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+  .modhead b { font-size: 13px; }
+  .modhead .mcount { margin-left: auto; }
+
+  /* CCF editor */
+  .cfg { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--line); }
+  .cfg:last-child { border-bottom: 0; }
+  .cfg .cl { flex: 1 1 auto; min-width: 0; }
+  .cfg .cl b { font-weight: 600; font-size: 13.5px; }
+  .cfg .cl span { display: block; font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); }
+  select.sel { background: var(--panel-2); border: 1px solid var(--line); color: var(--ink); font-family: var(--sans); font-size: 13px; padding: 8px 10px; border-radius: 9px; max-width: 54vw; }
+  .switch { width: 46px; height: 27px; border-radius: 999px; background: var(--line); border: 0; position: relative; cursor: pointer; flex: none; transition: background .15s; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch[aria-checked="true"] { background: var(--accent); }
+  .switch[aria-checked="true"]::after { transform: translateX(19px); }
+  .changed { color: var(--warn); font-size: 11px; font-family: var(--mono); }
+
+  .notice { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 11px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); font-size: 12.5px; color: var(--ink-2); }
+  .notice svg { width: 17px; height: 17px; flex: none; color: var(--warn); margin-top: 1px; }
+  .banner { font-family: var(--mono); font-size: 11px; color: var(--warn); display: inline-flex; align-items: center; gap: 6px; }
+
+  .split { display: grid; grid-template-columns: 1fr; gap: 14px; }
+
+  /* tablet / desktop */
+  @media (min-width: 820px) {
+    nav.tabs { display: none; }
+    nav.rail {
+      display: flex; flex-direction: column; gap: 4px; width: 92px; flex: none;
+      background: var(--panel); border-right: 1px solid var(--line);
+      padding: 14px 8px calc(14px + env(safe-area-inset-bottom,0px)) max(8px, env(safe-area-inset-left,0px));
+    }
+    nav.rail button {
+      appearance: none; background: none; border: 0; cursor: pointer; color: var(--ink-3);
+      font-family: var(--sans); font-size: 11px; font-weight: 600; border-radius: 11px;
+      display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 11px 4px;
+    }
+    nav.rail button svg { width: 22px; height: 22px; }
+    nav.rail button[aria-selected="true"] { color: var(--accent); background: var(--accent-dim); }
+    .split { grid-template-columns: 340px 1fr; align-items: start; }
+    .live { grid-template-columns: 1fr; }
+    .hero { grid-template-columns: 1.3fr 1fr; align-items: center; }
+  }
+  @media (min-width: 1180px) {
+    .split.wide { grid-template-columns: 380px 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 5 4-12 2 7h6"/></svg>
+      </div>
+      <div style="min-width:0">
+        <b>JLR OpenDiag</b><br><span>Discovery 4 · L319</span>
+      </div>
+    </div>
+    <div class="topspace"></div>
+    <div class="conn" id="conn" title="Estado da conexão">
+      <span class="dot sim" id="connDot"></span><span id="connText">Simulação</span>
+    </div>
+    <button class="iconbtn" id="themeBtn" title="Tema" aria-label="Alternar tema">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" id="rail"></nav>
+    <main>
+      <div class="pad">
+        <!-- DASHBOARD -->
+        <section class="view" id="v-dash">
+          <div class="card hero">
+            <div class="grid" style="gap:10px">
+              <div>
+                <h2 class="sec" style="margin-bottom:6px">Veículo</h2>
+                <div class="vin" id="vin">SALLAAAF4CA606217</div>
+              </div>
+              <div class="vrow">
+                <div>Modelo <b>Discovery 4</b></div>
+                <div>Plataforma <b>L319</b></div>
+                <div>Ano <b>2012 · MY12</b></div>
+                <div>Motor <b>3.0 SDV6 diesel</b></div>
+              </div>
+              <div class="chips">
+                <span class="chip">HS-CAN 500k</span>
+                <span class="chip">MS-CAN 125k</span>
+                <span class="chip">11 módulos online</span>
+                <span class="chip">Mongoose Pro JLR</span>
+              </div>
+            </div>
+            <div class="tiles" style="grid-template-columns:repeat(2,1fr)">
+              <div class="tile"><div class="k">Bateria</div><div class="v" style="color:var(--good)">12.06<span class="u"> V</span></div></div>
+              <div class="tile"><div class="k">DTCs ativos</div><div class="v" style="color:var(--crit)">320</div></div>
+              <div class="tile"><div class="k">Líq. arref.</div><div class="v">25<span class="u"> °C</span></div></div>
+              <div class="tile"><div class="k">Odômetro</div><div class="v" style="font-size:19px">147<span class="u">.291 km</span></div></div>
+            </div>
+          </div>
+
+          <div>
+            <h2 class="sec">Módulos</h2>
+            <div class="mods" id="mods"></div>
+          </div>
+        </section>
+
+        <!-- LIVE DATA -->
+        <section class="view" id="v-live" hidden>
+          <div class="toolbar">
+            <div class="seg" role="group" aria-label="Transporte">
+              <button id="playBtn" aria-pressed="true" title="Executar/pausar">❚❚ Pausar</button>
+            </div>
+            <div class="seg" role="group" aria-label="Janela de tempo">
+              <button data-win="30" aria-pressed="false">30s</button>
+              <button data-win="60" aria-pressed="true">60s</button>
+              <button data-win="120" aria-pressed="false">2min</button>
+            </div>
+            <div class="seg" role="group" aria-label="Modo do gráfico">
+              <button data-mode="stack" aria-pressed="true">Empilhado</button>
+              <button data-mode="overlay" aria-pressed="false">Sobreposto</button>
+            </div>
+            <div class="grow"></div>
+            <span class="banner" id="rateTag">● 4 Hz · simulado</span>
+          </div>
+
+          <div class="split wide">
+            <div class="card" style="padding:12px">
+              <div class="picker">
+                <input class="psearch" id="psearch" placeholder="Filtrar parâmetros…" aria-label="Filtrar parâmetros">
+                <div class="plist" id="plist"></div>
+              </div>
+            </div>
+            <div class="grid" style="gap:12px">
+              <div class="tiles" id="liveTiles"></div>
+              <div class="graphwrap">
+                <canvas class="graph" id="graph" height="520"></canvas>
+                <div class="legend" id="legend"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- DTCs -->
+        <section class="view" id="v-dtc" hidden>
+          <div class="toolbar">
+            <h2 class="sec" style="margin:0">Códigos de falha · 11 módulos</h2>
+            <div class="grow"></div>
+            <button class="btn" id="rescan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg> Reler</button>
+            <button class="btn warn" id="clearDtc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14"/></svg> Limpar</button>
+          </div>
+          <div class="notice">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            Muitos códigos têm status "não concluído neste ciclo" (ignição ligada, motor desligado), não são falhas reais. Os de status confirmado estão marcados em vermelho.
+          </div>
+          <div id="dtcList" class="grid" style="gap:12px"></div>
+        </section>
+
+        <!-- CONFIG / CCF -->
+        <section class="view" id="v-cfg" hidden>
+          <div class="toolbar">
+            <h2 class="sec" style="margin:0">Configuração de conforto · CCF</h2>
+            <div class="grow"></div>
+            <span class="changed" id="cfgChanged" hidden>0 alterações</span>
+            <button class="btn" id="cfgReset" hidden>Descartar</button>
+            <button class="btn accent" id="cfgWrite" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg> Gravar no BCM</button>
+          </div>
+          <div class="notice">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            Ler os valores é seguro. Gravar exige desbloqueio do BCM (SecurityAccess) e faz backup automático antes. Prefira alterar uma opção por vez.
+          </div>
+          <div class="card" id="cfgList"></div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <nav class="tabs" id="tabs"></nav>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+
+  /* ---------------- Navigation ---------------- */
+  var NAV = [
+    { id: "dash", label: "Painel", icon: '<path d="M3 13h8V3H3v10zm10 8h8V3h-8v18zM3 21h8v-6H3v6z"/>' },
+    { id: "live", label: "Ao vivo", icon: '<path d="M3 12h4l2 5 4-12 2 7h6"/>' },
+    { id: "dtc",  label: "Falhas", icon: '<path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>' },
+    { id: "cfg",  label: "Config", icon: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6h.1A1.6 1.6 0 0 0 9 1.1V1a2 2 0 0 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1h.1a2 2 0 0 1 0 4H23a1.6 1.6 0 0 0-1.6 1z"/>' }
+  ];
+  function svg(p, w) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + (w || 2) + '" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>'; }
+  var tabs = $("#tabs"), rail = $("#rail");
+  NAV.forEach(function (n) {
+    var h = svg(n.icon) + "<span>" + n.label + "</span>";
+    var b1 = document.createElement("button"); b1.innerHTML = h; b1.onclick = function () { go(n.id); };
+    b1.dataset.nav = n.id; tabs.appendChild(b1);
+    var b2 = document.createElement("button"); b2.innerHTML = h; b2.onclick = function () { go(n.id); };
+    b2.dataset.nav = n.id; rail.appendChild(b2);
+  });
+  var RESERVED = {};
+  function go(id) {
+    NAV.forEach(function (n) {
+      var on = n.id === id;
+      $("#v-" + n.id).hidden = !on;
+      document.querySelectorAll('[data-nav="' + n.id + '"]').forEach(function (b) { b.setAttribute("aria-selected", on ? "true" : "false"); });
+    });
+    try { location.hash = id; } catch (e) {}
+    if (id === "live") { ensureGraphSize(); }
+    $("main").scrollTop = 0;
+  }
+  window.addEventListener("hashchange", function () {
+    var h = (location.hash || "").replace("#", "");
+    if (NAV.some(function (n) { return n.id === h; })) go(h);
+  });
+
+  /* ---------------- Theme ---------------- */
+  $("#themeBtn").onclick = function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+    ensureGraphSize();
+  };
+
+  /* ---------------- Modules (dados reais lidos do carro) ---------------- */
+  var MODULES = [
+    ["PCM", "Powertrain", 230, "on"], ["TCM", "Transmissão", 41, "on"],
+    ["RLM", "Suspensão a ar", 36, "on"], ["IPC", "Painel", 10, "on"],
+    ["SASM", "Ângulo de direção", 2, "on"], ["ATCM", "All-terrain", 1, "on"],
+    ["ABS", "Freios ABS", 0, "on"], ["BCM", "Carroceria", 0, "on"],
+    ["RCM", "Airbag", 0, "on"], ["PBM", "Freio estac.", 0, "on"],
+    ["TCCM", "Caixa transf.", 0, "on"],
+    ["DDM", "Porta motorista", null, "off"], ["HVAC", "Climatização", null, "off"]
+  ];
+  var modsEl = $("#mods");
+  MODULES.forEach(function (m) {
+    var d = document.createElement("div"); d.className = "mod";
+    var online = m[3] === "on";
+    var col = !online ? "var(--ink-3)" : (m[2] > 0 ? "var(--crit)" : "var(--good)");
+    var cls = !online ? "off" : (m[2] > 0 ? "bad" : "ok");
+    var cnt = !online ? "—" : (m[2] > 0 ? m[2] + " DTC" : "OK");
+    d.innerHTML = '<span class="mstat" style="background:' + col + ';box-shadow:0 0 7px ' + col + '"></span>' +
+      '<div style="min-width:0"><div class="mname">' + m[0] + '</div><div class="mdesc">' + m[1] + '</div></div>' +
+      '<span class="mcount ' + cls + '">' + cnt + '</span>';
+    d.onclick = function () { go("dtc"); };
+    modsEl.appendChild(d);
+  });
+
+  /* ---------------- Live parameters (PIDs reais + simulação) ---------------- */
+  // sim(t) devolve um valor plausível de motor em marcha lenta (demo).
+  var SERIES_VARS = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+  function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  var PARAMS = [
+    { id:"rpm",   g:"Motor", label:"Rotação", unit:"rpm", min:0, max:3500, base:770, noise:28, drift:0, read:function(t){return 770+Math.sin(t/2.1)*35+(Math.random()-.5)*40+(Math.sin(t/13)>.93?900:0);} },
+    { id:"clt",   g:"Motor", label:"Temp. líq. arrefecimento", unit:"°C", min:0, max:120, read:warm(25,89,120) },
+    { id:"iat",   g:"Motor", label:"Temp. ar admissão", unit:"°C", min:0, max:80, read:function(t){return 31+Math.sin(t/7)*3+(Math.random()-.5)*1.2;} },
+    { id:"oilt",  g:"Motor", label:"Temp. óleo", unit:"°C", min:0, max:150, read:warm(26,96,160) },
+    { id:"map",   g:"Motor", label:"Pressão coletor (MAP)", unit:"kPa", min:0, max:300, read:function(t){return 101+Math.sin(t/1.7)*6+(Math.random()-.5)*4;} },
+    { id:"boost", g:"Motor", label:"Pressão turbo", unit:"bar", min:-1, max:2.5, read:function(t){return 0.02+Math.max(0,Math.sin(t/9))*0.08+(Math.random()-.5)*0.01;} },
+    { id:"maf",   g:"Motor", label:"Fluxo de ar (MAF)", unit:"g/s", min:0, max:400, read:function(t){return 11+Math.sin(t/2.3)*2.5+(Math.random()-.5)*1.5;} },
+    { id:"rail",  g:"Diesel", label:"Pressão rail comum", unit:"bar", min:0, max:2000, base:300, read:function(t){return 300+Math.sin(t/1.9)*40+(Math.random()-.5)*25;} },
+    { id:"inj",   g:"Diesel", label:"Correção injetor cil.1", unit:"mm³", min:-5, max:5, read:function(t){return 0.42+Math.sin(t/11)*0.15+(Math.random()-.5)*0.05;} },
+    { id:"dpf",   g:"Diesel", label:"Fuligem no DPF", unit:"g", min:0, max:45, read:function(t){return 18.3+Math.sin(t/40)*0.3;} },
+    { id:"egt",   g:"Diesel", label:"Temp. gases escape", unit:"°C", min:0, max:800, read:warm(120,230,900) },
+    { id:"batt",  g:"Elétrico", label:"Tensão da bateria", unit:"V", min:8, max:16, read:function(t){return 14.08+Math.sin(t/5)*0.06+(Math.random()-.5)*0.04;} },
+    { id:"fuel",  g:"Elétrico", label:"Nível combustível", unit:"%", min:0, max:100, read:function(t){return 68-t*0.002;} },
+    { id:"vss",   g:"Chassi", label:"Velocidade", unit:"km/h", min:0, max:200, read:function(){return 0;} },
+    { id:"sas",   g:"Chassi", label:"Ângulo de direção", unit:"°", min:-540, max:540, read:function(t){return Math.sin(t/8)*4;} },
+    { id:"height",g:"Chassi", label:"Altura susp. diant. E", unit:"mm", min:-40, max:80, read:function(t){return 2+Math.sin(t/15)*0.6;} }
+  ];
+  function warm(a,b,tau){ return function(t){ return (b-(b-a)*Math.exp(-t/tau))+(Math.random()-.5)*0.6; }; }
+
+  var WINDOW = 60, HZ = 4, MODE = "stack", PLAYING = true;
+  var CAP = 120 * HZ; // buffer máx (2 min)
+  var t0 = performance.now() / 1000, simT = 0;
+  PARAMS.forEach(function (p, i) { p.buf = []; p.val = p.read(0); p.color = SERIES_VARS[i % 8]; p.on = false; });
+  // seleção inicial: 3 parâmetros plotados
+  ["rpm","clt","batt"].forEach(function(id,i){ var p=byId(id); p.on=true; });
+  function byId(id){ return PARAMS.filter(function(p){return p.id===id;})[0]; }
+  function selected(){ return PARAMS.filter(function(p){return p.on;}); }
+
+  /* picker UI */
+  var plist = $("#plist");
+  function groups(){ var g={},o=[]; PARAMS.forEach(function(p){ if(!g[p.g]){g[p.g]=[];o.push(p.g);} g[p.g].push(p); }); return o.map(function(n){return [n,g[n]];}); }
+  function renderPicker(filter){
+    filter = (filter||"").toLowerCase();
+    plist.innerHTML = "";
+    groups().forEach(function (grp) {
+      var items = grp[1].filter(function(p){ return !filter || p.label.toLowerCase().indexOf(filter)>=0 || p.id.indexOf(filter)>=0; });
+      if (!items.length) return;
+      var h = document.createElement("div"); h.className="pgroup"; h.textContent = grp[0]; plist.appendChild(h);
+      items.forEach(function (p) {
+        var row = document.createElement("div"); row.className="prow"; row.dataset.on = p.on?"1":"0";
+        row.style.setProperty("--sw", css(p.color));
+        row.innerHTML = '<span class="swatch"></span><div class="pl"><b>'+p.label+'</b><span>'+p.id.toUpperCase()+'</span></div>'+
+          '<div class="pv" id="pv-'+p.id+'">'+fmt(p)+'<br><small>'+p.unit+'</small></div>';
+        row.onclick = function(){ p.on=!p.on; row.dataset.on=p.on?"1":"0"; syncLive(); };
+        plist.appendChild(row);
+      });
+    });
+  }
+  function fmt(p){ var v=p.val, d = Math.abs(v)>=100?0:(Math.abs(v)>=10?1:2); return v.toFixed(d); }
+  $("#psearch").oninput = function(){ renderPicker(this.value); };
+
+  /* live tiles + legend */
+  var tilesEl = $("#liveTiles"), legendEl = $("#legend");
+  function syncLive(){
+    var sel = selected();
+    tilesEl.innerHTML = "";
+    sel.forEach(function(p){
+      var t = document.createElement("div"); t.className="tile";
+      t.innerHTML = '<div class="k">'+p.label+'</div><div class="v" id="tv-'+p.id+'" style="color:'+css(p.color)+'">'+fmt(p)+'<span class="u"> '+p.unit+'</span></div>'+
+        '<canvas class="spark" id="sp-'+p.id+'"></canvas>';
+      tilesEl.appendChild(t);
+    });
+    legendEl.innerHTML = "";
+    sel.forEach(function(p){
+      var l=document.createElement("span"); l.className="lg";
+      l.innerHTML='<i style="background:'+css(p.color)+'"></i>'+p.label+' <b id="lv-'+p.id+'">'+fmt(p)+' '+p.unit+'</b>';
+      legendEl.appendChild(l);
+    });
+    document.querySelectorAll(".prow").forEach(function(r){});
+    ensureGraphSize();
+  }
+
+  /* ---------------- Graph (canvas) ---------------- */
+  var cv = $("#graph"), ctx = cv.getContext("2d"), DPR = Math.min(2, window.devicePixelRatio||1);
+  var cross = null;
+  function ensureGraphSize(){
+    var sel = selected();
+    var w = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    var h = MODE==="overlay" ? 300 : Math.max(160, Math.min(560, sel.length*96 + 24));
+    cv.style.height = h+"px";
+    cv.width = Math.round(w*DPR); cv.height = Math.round(h*DPR);
+    draw();
+  }
+  window.addEventListener("resize", ensureGraphSize);
+  cv.addEventListener("pointermove", function(e){ var r=cv.getBoundingClientRect(); cross=(e.clientX-r.left)/r.width; draw(); });
+  cv.addEventListener("pointerleave", function(){ cross=null; draw(); });
+
+  function draw(){
+    var W=cv.width, H=cv.height, sel=selected();
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = css("--panel"); ctx.fillRect(0,0,W,H);
+    if(!sel.length){ ctx.fillStyle=css("--ink-3"); ctx.font=(13*DPR)+"px "+css("--sans")||"sans-serif"; ctx.textAlign="center";
+      ctx.fillText("Selecione parâmetros para plotar", W/2, H/2); return; }
+    var padL=54*DPR, padR=12*DPR, padT=10*DPR, padB=20*DPR;
+    var gridc = css("--line"), ink2=css("--ink-2"), ink3=css("--ink-3");
+    var n = Math.round(WINDOW*HZ);
+    function xAt(i,len){ return padL + (padL!==undefined?0:0) + ( (i)/(n-1) ) * (W-padL-padR); }
+    // time axis helper
+    function tx(frac){ return padL + frac*(W-padL-padR); }
+
+    if(MODE==="overlay"){
+      var top=padT, bot=H-padB, L=padL, R=W-padR;
+      // grid
+      ctx.strokeStyle=gridc; ctx.lineWidth=1*DPR; ctx.beginPath();
+      for(var gy=0;gy<=4;gy++){ var y=top+(bot-top)*gy/4; ctx.moveTo(L,y); ctx.lineTo(R,y);} ctx.stroke();
+      ctx.fillStyle=ink3; ctx.font=(10*DPR)+"px "+monoFont(); ctx.textAlign="right"; ctx.textBaseline="middle";
+      for(var gy2=0;gy2<=4;gy2++){ ctx.fillText((100-gy2*25)+"%", L-6*DPR, top+(bot-top)*gy2/4); }
+      sel.forEach(function(p){ drawLine(p, L,R,top,bot, true); });
+      drawCross(L,R,top,bot,sel,true);
+      drawTimeAxis(L,R,bot);
+    } else {
+      var stripH=(H-padB)/sel.length;
+      sel.forEach(function(p,si){
+        var top=si*stripH+6*DPR, bot=(si+1)*stripH-6*DPR, L=padL, R=W-padR;
+        // strip bg + baseline
+        ctx.strokeStyle=gridc; ctx.lineWidth=1*DPR;
+        ctx.beginPath(); ctx.moveTo(L,bot); ctx.lineTo(R,bot); ctx.moveTo(L,top); ctx.lineTo(R,top); ctx.stroke();
+        // label + range
+        var rng=niceRange(p);
+        ctx.fillStyle=ink3; ctx.font=(9.5*DPR)+"px "+monoFont(); ctx.textAlign="right"; ctx.textBaseline="top";
+        ctx.fillText(rng.hi, L-6*DPR, top-2*DPR); ctx.textBaseline="bottom"; ctx.fillText(rng.lo, L-6*DPR, bot);
+        ctx.fillStyle=css(p.color); ctx.textAlign="left"; ctx.textBaseline="top"; ctx.font="600 "+(11*DPR)+"px "+sansFont();
+        ctx.fillText(p.label.toUpperCase(), L+6*DPR, top+2*DPR);
+        drawLine(p, L,R,top,bot, false, rng);
+      });
+      drawCross(padL,W-padR,padT,H-padB,sel,false);
+      drawTimeAxis(padL,W-padR,H-padB);
+    }
+  }
+  function monoFont(){ return (getComputedStyle(cv).fontFamily||"monospace"); }
+  function sansFont(){ return "system-ui,sans-serif"; }
+  function niceRange(p){
+    var buf=p.buf, lo=p.min, hi=p.max;
+    if(buf.length){ var mn=Infinity,mx=-Infinity; buf.forEach(function(s){ if(s.v<mn)mn=s.v; if(s.v>mx)mx=s.v; });
+      var pad=(mx-mn)*0.15||Math.abs(mx)*0.05||1; lo=mn-pad; hi=mx+pad; }
+    var d=Math.abs(hi)>=100?0:1;
+    return { lo:lo.toFixed(d), hi:hi.toFixed(d), lov:lo, hiv:hi };
+  }
+  function drawLine(p,L,R,top,bot,overlay,rng){
+    var buf=p.buf; if(buf.length<2) return;
+    var now=simT, span=WINDOW;
+    function yv(v){ if(overlay){ var f=(v-p.min)/(p.max-p.min); return bot-(bot-top)*clamp01(f); }
+      var lo=rng.lov, hi=rng.hiv; return bot-(bot-top)*clamp01((v-lo)/(hi-lo||1)); }
+    ctx.strokeStyle=css(p.color); ctx.lineWidth=2*DPR; ctx.lineJoin="round"; ctx.beginPath();
+    var started=false, lastX=0,lastY=0;
+    buf.forEach(function(s){
+      var frac=1-(now-s.t)/span; if(frac<0||frac>1) return;
+      var x=L+frac*(R-L), y=yv(s.v);
+      if(!started){ ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
+      lastX=x; lastY=y;
+    });
+    ctx.stroke();
+    // endpoint emphasis
+    if(started){ ctx.fillStyle=css(p.color); ctx.beginPath(); ctx.arc(lastX,lastY,3*DPR,0,7); ctx.fill();
+      ctx.fillStyle=css("--panel"); ctx.beginPath(); ctx.arc(lastX,lastY,1.3*DPR,0,7); ctx.fill(); }
+  }
+  function drawTimeAxis(L,R,bot){
+    ctx.fillStyle=css("--ink-3"); ctx.font=(9.5*DPR)+"px "+monoFont(); ctx.textBaseline="top";
+    ctx.textAlign="left"; ctx.fillText("-"+WINDOW+"s", L+2*DPR, bot+4*DPR);
+    ctx.textAlign="right"; ctx.fillText("agora", R, bot+4*DPR);
+  }
+  function drawCross(L,R,top,bot,sel,overlay){
+    if(cross==null) return; var x=L+cross*(R-L); if(x<L||x>R) return;
+    ctx.strokeStyle=css("--ink-3"); ctx.lineWidth=1*DPR; ctx.setLineDash([3*DPR,3*DPR]);
+    ctx.beginPath(); ctx.moveTo(x,top); ctx.lineTo(x,bot); ctx.stroke(); ctx.setLineDash([]);
+    // tooltip: valor de cada série no tempo do crosshair
+    var frac=(x-L)/(R-L), tt=simT-WINDOW*(1-frac);
+    var lines=sel.map(function(p){ return { c:css(p.color), t:p.label, v:valueAt(p,tt), u:p.unit }; });
+    var bw=0; ctx.font=(10.5*DPR)+"px "+monoFont();
+    lines.forEach(function(l){ var s=l.t+"  "+l.v+" "+l.u; bw=Math.max(bw, ctx.measureText(s).width); });
+    bw+=20*DPR; var bh=(lines.length*15+10)*DPR;
+    var bx=Math.min(x+8*DPR, R-bw), by=top+6*DPR;
+    ctx.fillStyle=css("--panel-2"); ctx.strokeStyle=css("--line"); ctx.lineWidth=1*DPR;
+    rr(bx,by,bw,bh,6*DPR); ctx.fill(); ctx.stroke();
+    lines.forEach(function(l,i){ var ly=by+(10+i*15)*DPR;
+      ctx.fillStyle=l.c; ctx.fillRect(bx+8*DPR, ly-3*DPR, 7*DPR,7*DPR);
+      ctx.fillStyle=css("--ink"); ctx.textAlign="left"; ctx.textBaseline="middle";
+      ctx.fillText(l.t+"  "+l.v+" "+l.u, bx+20*DPR, ly); });
+  }
+  function valueAt(p,tt){ var buf=p.buf; if(!buf.length) return "—"; var best=buf[0];
+    for(var i=0;i<buf.length;i++){ if(Math.abs(buf[i].t-tt)<Math.abs(best.t-tt)) best=buf[i]; }
+    var d=Math.abs(best.v)>=100?0:(Math.abs(best.v)>=10?1:2); return best.v.toFixed(d); }
+  function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+  function clamp01(v){ return v<0?0:v>1?1:v; }
+
+  /* sparklines nas tiles */
+  function drawSparks(){
+    selected().forEach(function(p){
+      var c=document.getElementById("sp-"+p.id); if(!c) return;
+      var w=c.clientWidth||120,h=26; if(c.width!==w*DPR){c.width=w*DPR;c.height=h*DPR;}
+      var x=c.getContext("2d"); x.clearRect(0,0,c.width,c.height);
+      var buf=p.buf; if(buf.length<2) return;
+      var mn=Infinity,mx=-Infinity; buf.forEach(function(s){ if(s.v<mn)mn=s.v; if(s.v>mx)mx=s.v; }); if(mx-mn<1e-9){mx+=1;mn-=1;}
+      x.strokeStyle=css(p.color); x.globalAlpha=.9; x.lineWidth=1.5*DPR; x.beginPath();
+      buf.forEach(function(s,i){ var xx=(i/(buf.length-1))*c.width, yy=c.height-((s.v-mn)/(mx-mn))*c.height*0.9-c.height*0.05;
+        i?x.lineTo(xx,yy):x.moveTo(xx,yy); }); x.stroke();
+    });
+  }
+
+  /* ---------------- Sim loop ---------------- */
+  function tick(){
+    if(PLAYING){
+      simT = performance.now()/1000 - t0;
+      PARAMS.forEach(function(p){
+        p.val = p.read(simT);
+        p.buf.push({t:simT, v:p.val});
+        var cut=simT-125; while(p.buf.length && p.buf[0].t<cut) p.buf.shift();
+        if(p.buf.length>CAP) p.buf.shift();
+      });
+      // update readouts
+      PARAMS.forEach(function(p){ var el=document.getElementById("pv-"+p.id); if(el) el.innerHTML=fmt(p)+'<br><small>'+p.unit+'</small>'; });
+      selected().forEach(function(p){
+        var tv=document.getElementById("tv-"+p.id); if(tv) tv.innerHTML=fmt(p)+'<span class="u"> '+p.unit+'</span>';
+        var lv=document.getElementById("lv-"+p.id); if(lv) lv.textContent=fmt(p)+' '+p.unit;
+      });
+      if(!$("#v-live").hidden){ draw(); drawSparks(); }
+    }
+    setTimeout(tick, 1000/HZ);
+  }
+
+  /* controls */
+  $("#playBtn").onclick=function(){ PLAYING=!PLAYING; this.setAttribute("aria-pressed",PLAYING); this.textContent=PLAYING?"❚❚ Pausar":"▶ Executar"; };
+  document.querySelectorAll('[data-win]').forEach(function(b){ b.onclick=function(){ WINDOW=+b.dataset.win;
+    document.querySelectorAll('[data-win]').forEach(function(x){x.setAttribute("aria-pressed","false");}); b.setAttribute("aria-pressed","true"); ensureGraphSize(); }; });
+  document.querySelectorAll('[data-mode]').forEach(function(b){ b.onclick=function(){ MODE=b.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach(function(x){x.setAttribute("aria-pressed","false");}); b.setAttribute("aria-pressed","true"); ensureGraphSize(); }; });
+
+  /* ---------------- DTCs (reais) ---------------- */
+  var DTCS = {
+    PCM: [["P0671","Circuito vela aquec. cil. 1","Confirmado","conf"],["P2263","Turbo/supercharger boost","Confirmado","conf"],
+          ["P0401","Fluxo de EGR insuficiente","Confirmado","conf"],["P2459","Frequência regen. DPF","Pendente","pend"],
+          ["P0087","Pressão rail baixa","Confirmado","conf"],["P0300","Falha combustão múltipla","Histórico","hist"]],
+    TCM: [["P0931","Sensor pressão linha","Confirmado","conf"],["P0562","Tensão sistema baixa","Confirmado","conf"],
+          ["P0715","Sensor rotação entrada","Pendente","pend"]],
+    RLM: [["C1A13","Compressor suspensão","Confirmado","conf"],["C1A20","Válvula eixo diant. E","Confirmado","conf"],
+          ["U0133","Perda comunic. RLM","Pendente","pend"],["C1A34","Sensor altura tras. D","Histórico","hist"]],
+    IPC: [["U0100","Perda comunic. PCM","Histórico","hist"],["U0155","Perda comunic. IPC","Histórico","hist"],
+          ["B1009","Alimentação painel","Histórico","hist"]],
+    SASM:[["U0300","Incompat. software interno","Pendente","pend"],["C0051","Sensor ângulo direção","Histórico","hist"]],
+    ATCM:[["C1A01","Calibração requerida","Pendente","pend"]]
+  };
+  var DESC = {}; // descrições curtas já embutidas acima
+  var dtcList=$("#dtcList");
+  function renderDtc(){
+    dtcList.innerHTML="";
+    Object.keys(DTCS).forEach(function(mod){
+      var arr=DTCS[mod]; var card=document.createElement("div"); card.className="card";
+      var total = MODULES.filter(function(m){return m[0]===mod;})[0];
+      var tn = total?total[2]:arr.length;
+      card.innerHTML='<div class="modhead"><b>'+mod+'</b><span style="color:var(--ink-3);font-size:12px">'+moduleName(mod)+'</span>'+
+        '<span class="mcount bad">'+tn+' DTC</span></div>';
+      arr.forEach(function(d){
+        var row=document.createElement("div"); row.className="dtc";
+        var col=d[3]==="conf"?"var(--crit)":d[3]==="pend"?"var(--warn)":"var(--ink-3)";
+        row.innerHTML='<div class="code" style="color:'+col+'">'+d[0]+'</div>'+
+          '<div class="ddesc"><b>'+d[1]+'</b><span>'+mod+' · '+moduleName(mod)+'</span></div>'+
+          '<span class="badge '+d[3]+'">'+d[2]+'</span>';
+        card.appendChild(row);
+      });
+      if(tn>arr.length){ var more=document.createElement("div"); more.className="dtc"; more.style.color="var(--ink-3)";
+        more.innerHTML='<div class="code"></div><div class="ddesc"><span>+ '+(tn-arr.length)+' outros (maioria "não concluído neste ciclo")</span></div>'; card.appendChild(more); }
+      dtcList.appendChild(card);
+    });
+  }
+  function moduleName(m){ var r=MODULES.filter(function(x){return x[0]===m;})[0]; return r?r[1]:""; }
+  $("#rescan").onclick=function(){ renderDtc(); };
+  $("#clearDtc").onclick=function(){ alertBox("Limpar DTCs envia o serviço 0x14 a cada módulo. No app real, pede confirmação e relê depois. (Protótipo: nada enviado.)"); };
+
+  /* ---------------- CCF editor (reais, valores atuais do carro) ---------------- */
+  var CCF = [
+    { name:"Luzes de acesso (welcome)", id:"byte 47 · bit 2", type:"bool", val:0, orig:0 },
+    { name:"Luz de cortesia nos espelhos (puddle)", id:"byte 86", type:"enum", val:1, orig:1,
+      opts:[[1,"Sem luz de cortesia"],[2,"Ambos os lados"],[3,"Só motorista"],[4,"Só passageiro"]] },
+    { name:"Homesafe (luz te acompanha)", id:"byte 148", type:"enum", val:0, orig:0,
+      opts:[[0,"Indefinida"],[1,"Desativado"],[2,"30 s"],[3,"60 s"],[4,"90 s"],[5,"120 s"],[6,"150 s"],[7,"180 s"]] },
+    { name:"Follow-me-home na ré", id:"byte 46 · bit 7", type:"bool", val:1, orig:1 },
+    { name:"Luzes diurnas (DRL)", id:"byte 15", type:"enum", val:2, orig:2,
+      opts:[[2,"Desligadas (padrão)"],[1,"Sempre farol baixo, exceto 'P'"],[3,"Baixo em todas as posições"],[5,"Lâmpada DRL dedicada"]] },
+    { name:"Temporizador do farol", id:"byte 44", type:"enum", val:30, orig:30,
+      opts:[[0,"Desligado"],[30,"30 s"],[60,"60 s"],[120,"120 s"],[240,"240 s"]] },
+    { name:"3 flashes do pisca (toque)", id:"byte 46 · bit 4", type:"bool", val:1, orig:1 }
+  ];
+  var cfgList=$("#cfgList");
+  function renderCfg(){
+    cfgList.innerHTML="";
+    CCF.forEach(function(c,idx){
+      var row=document.createElement("div"); row.className="cfg";
+      var ctrl;
+      if(c.type==="bool"){
+        ctrl='<button class="switch" role="switch" aria-checked="'+(c.val?"true":"false")+'" data-i="'+idx+'"></button>';
+      } else {
+        ctrl='<select class="sel" data-i="'+idx+'">'+c.opts.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===c.val?" selected":"")+'>'+o[1]+'</option>'; }).join("")+'</select>';
+      }
+      var ch = c.val!==c.orig ? '<span class="changed">alterado</span>' : '';
+      row.innerHTML='<div class="cl"><b>'+c.name+'</b><span>'+c.id+'</span></div>'+ch+ctrl;
+      cfgList.appendChild(row);
+    });
+    cfgList.querySelectorAll(".switch").forEach(function(s){ s.onclick=function(){ var i=+s.dataset.i; CCF[i].val=CCF[i].val?0:1; renderCfg(); cfgState(); }; });
+    cfgList.querySelectorAll("select").forEach(function(s){ s.onchange=function(){ var i=+s.dataset.i; CCF[i].val=+s.value; renderCfg(); cfgState(); }; });
+    cfgState();
+  }
+  function cfgState(){
+    var n=CCF.filter(function(c){return c.val!==c.orig;}).length;
+    var tag=$("#cfgChanged"), reset=$("#cfgReset"), write=$("#cfgWrite");
+    tag.hidden=reset.hidden=(n===0); write.disabled=(n===0);
+    tag.textContent=n+" alteraç"+(n===1?"ão":"ões");
+  }
+  $("#cfgReset").onclick=function(){ CCF.forEach(function(c){ c.val=c.orig; }); renderCfg(); };
+  $("#cfgWrite").onclick=function(){ var ch=CCF.filter(function(c){return c.val!==c.orig;}).map(function(c){return "• "+c.name;}).join("\n");
+    alertBox("No app real: backup do CCF → desbloqueio do BCM → recálculo do checksum → gravação 0x2E DE00 → releitura de verificação.\n\nAlterações:\n"+ch+"\n\n(Protótipo: nada enviado ao veículo.)"); };
+
+  /* mini modal */
+  function alertBox(msg){
+    var ov=document.createElement("div"); ov.style.cssText="position:fixed;inset:0;z-index:100;background:#0008;display:grid;place-items:center;padding:20px";
+    var bx=document.createElement("div"); bx.className="card pad2"; bx.style.cssText="max-width:420px;white-space:pre-wrap;font-size:13px;line-height:1.5";
+    bx.innerHTML='<div style="font-weight:600;margin-bottom:8px">Ação do protótipo</div><div style="color:var(--ink-2)">'+msg.replace(/</g,"&lt;")+'</div>';
+    var b=document.createElement("button"); b.className="btn accent"; b.style.marginTop="14px"; b.textContent="Entendi"; b.onclick=function(){ov.remove();};
+    bx.appendChild(b); ov.appendChild(bx); ov.onclick=function(e){ if(e.target===ov) ov.remove(); }; document.body.appendChild(ov);
+  }
+
+  /* ---------------- boot ---------------- */
+  renderPicker(""); syncLive(); renderDtc(); renderCfg();
+  var start=(location.hash||"").replace("#","");
+  go(NAV.some(function(n){return n.id===start;})?start:"dash");
+  ensureGraphSize(); tick();
+})();
+</script>
