@@ -756,7 +756,10 @@ fn ccf_flash<T: Transport<Error: 'static>>(
     // === GRAVAÇÃO (destrutivo a partir do erase) ===
     anyhow::ensure!(yes, "--write exige --yes (vai APAGAR e regravar o CCF do BCM)");
 
-    // 5) ERASE.
+    // 5) ERASE. Formato CONFIRMADO no carro: 31 01 FF00 <addr:4> <len:4>, SEM o
+    // byte ALFID. (Teste: com ALFID 0x44 o BCM responde 7F 31 13 incorrectLength;
+    // sem ALFID responde 7F 31 22 conditionsNotCorrect — ou seja, o formato sem
+    // ALFID é aceito e o 0x22 é precondição de ESTADO, não de formato.)
     let erase = alfid44(
         0x31,
         &[0x01, (erase_routine >> 8) as u8, (erase_routine & 0xff) as u8],
