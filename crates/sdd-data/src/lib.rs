@@ -7,6 +7,7 @@
 
 pub mod ccf;
 pub mod db;
+pub mod did;
 pub mod dtc;
 pub mod dtc_help;
 pub mod model;
@@ -76,6 +77,18 @@ impl SddInstall {
         self.sdd_data_dir().join(lang).join("rds-dtc-help")
     }
 
+    /// Pasta gradex de um idioma (`Common\SDD\Data\<lang>\gradex`): dentro dela
+    /// `Snapshot/` tem os DID Formatting e `Converters/` os conversores.
+    pub fn gradex_dir(&self, lang: &str) -> PathBuf {
+        self.sdd_data_dir().join(lang).join("gradex")
+    }
+
+    /// Caminho do `mdl.xml` (dicionário de PIDs, liga DID->módulos). Fica em
+    /// `ProgramData`, fora da raiz da instalação; usa o caminho padrão do Windows.
+    pub fn mdl_path(&self) -> PathBuf {
+        PathBuf::from(r"C:\ProgramData\JLR\IDS\OnlinePIDHelp\Data\PROCS\mdl.xml")
+    }
+
     /// Existe de fato?
     pub fn exists(&self) -> bool {
         self.xml_dir().is_dir()
@@ -98,6 +111,10 @@ pub struct ImportSpec {
     pub year_code: String,
     /// Ordem de idiomas para resolver textos (ex.: `["ptb","ptg","eng"]`).
     pub langs: Vec<String>,
+    /// Tipo de motor para desempatar live data por motor (ex.: `V6DIESEL`).
+    pub engine: Option<String>,
+    /// Subtipo de motor (ex.: `3L`).
+    pub engine_sub: Option<String>,
 }
 
 /// Importa um veículo+ano para um pacote SQLite novo em `out_db`.
@@ -149,6 +166,9 @@ pub fn import_vehicle(
     // códigos que se aplicam a este modelo entram no pacote.
     let dtc_help = load_dtc_help(install, &spec.model)?;
 
+    // Live data por módulo (DIDs + conversores), filtrado para este veículo.
+    let did_catalog = load_did_catalog(install, spec, &platform.modules)?;
+
     let summary = ImportSummary {
         modules: platform.modules.len(),
         networks: platform.networks.len(),
@@ -157,11 +177,158 @@ pub fn import_vehicle(
         ccf_options: ccf.params.iter().map(|p| p.options.len()).sum(),
         dtc_texts: dtc_texts.len(),
         dtc_help: dtc_help.len(),
+        did_params: did_catalog.entries.iter().map(|e| e.params.len()).sum(),
     };
 
-    db::write_pack(out_db, &platform, &ccf, &dtc_texts, &dtc_help, &mut resolver)?;
+    db::write_pack(
+        out_db,
+        &platform,
+        &ccf,
+        &dtc_texts,
+        &dtc_help,
+        &did_catalog,
+        &mut resolver,
+    )?;
 
     Ok(summary)
+}
+
+/// Carrega o catálogo de live data (DIDs legíveis por módulo + conversores).
+///
+/// Usa os "DID Formatting" qualificados por módulo e por módulo+modelo+ano+motor
+/// (os "Unqualified", sem módulo, não entram: não há como endereçar a leitura).
+/// Fica com um DID por (módulo, id), preferindo o de maior qualificação e o do
+/// motor do veículo. Idioma: pt_br (nomes/rótulos) com fallback en.
+fn load_did_catalog(
+    install: &SddInstall,
+    spec: &ImportSpec,
+    modules: &[model::Module],
+) -> Result<did::Catalog, DataError> {
+    use std::collections::{HashMap, HashSet};
+
+    let lang = ["pt_br", "en"]
+        .into_iter()
+        .find(|l| install.gradex_dir(l).join("Snapshot").is_dir());
+    let Some(lang) = lang else {
+        return Ok(did::Catalog::default());
+    };
+    let snap = install.gradex_dir(lang).join("Snapshot");
+    let conv_dir = install.gradex_dir(lang).join("Converters");
+    let conv_dir_en = install.gradex_dir("en").join("Converters");
+
+    let module_set: HashSet<&str> = modules.iter().map(|m| m.acronym.as_str()).collect();
+
+    // Pontuação para desempate: mais qualificado e com motor do veículo ganha.
+    let score = |e: &did::DidEntry| -> u8 {
+        let mut s = (e.qual as u8) * 4;
+        if spec.engine.is_some() && e.vtype.as_deref() == spec.engine.as_deref() {
+            s += 2;
+        }
+        if spec.engine_sub.is_some() && e.subtype.as_deref() == spec.engine_sub.as_deref() {
+            s += 1;
+        }
+        s
+    };
+
+    let files = [
+        ("Fully Qualified DID Formatting.xml", did::Qual::Fully, false),
+        ("Fully Qualified Bit DID Formatting.xml", did::Qual::Fully, true),
+        ("Module Qualified DID Formatting.xml", did::Qual::Module, false),
+        ("Module Qualified Bit DID Formatting.xml", did::Qual::Module, true),
+    ];
+
+    let mut best: HashMap<(String, u16), did::DidEntry> = HashMap::new();
+    for (fname, qual, bit) in files {
+        let Ok(xml) = std::fs::read_to_string(snap.join(fname)) else {
+            continue;
+        };
+        for e in did::parse_did_formatting(&xml, qual, bit)? {
+            let Some(module) = e.module.clone() else { continue };
+            if !module_set.contains(module.as_str()) || e.params.is_empty() {
+                continue;
+            }
+            if qual == did::Qual::Fully {
+                // Exige o modelo do pacote; ano ausente ou igual.
+                if e.model.as_deref() != Some(spec.model.as_str()) {
+                    continue;
+                }
+                if let Some(y) = &e.year {
+                    if y != &spec.model_year {
+                        continue;
+                    }
+                }
+            }
+            let key = (module, e.did);
+            let keep = best.get(&key).map(|p| score(&e) > score(p)).unwrap_or(true);
+            if keep {
+                best.insert(key, e);
+            }
+        }
+    }
+
+    // DIDs "Unqualified" (sem módulo no formatting): ligá-los aos módulos do
+    // veículo pelo mdl.xml (DID -> módulos). Resolve, p.ex., a suspensão a ar
+    // (alturas 0x3B03-06 lidas do RLM no L319). Module/Fully têm precedência.
+    let did_modules = std::fs::read_to_string(install.mdl_path())
+        .ok()
+        .map(|xml| did::parse_mdl(&xml))
+        .unwrap_or_default();
+    if !did_modules.is_empty() {
+        let unq = [
+            ("Unqualified DID Formatting.xml", false),
+            ("Unqualified Bit DID Formatting.xml", true),
+        ];
+        for (fname, bit) in unq {
+            let Ok(xml) = std::fs::read_to_string(snap.join(fname)) else {
+                continue;
+            };
+            for e in did::parse_did_formatting(&xml, did::Qual::Unqualified, bit)? {
+                if e.params.is_empty() {
+                    continue;
+                }
+                let Some(mods) = did_modules.get(&e.did) else {
+                    continue;
+                };
+                for m in mods {
+                    if !module_set.contains(m.as_str()) {
+                        continue;
+                    }
+                    let key = (m.clone(), e.did);
+                    best.entry(key).or_insert_with(|| {
+                        let mut bound = e.clone();
+                        bound.module = Some(m.clone());
+                        bound
+                    });
+                }
+            }
+        }
+    }
+
+    let entries: Vec<did::DidEntry> = best.into_values().collect();
+
+    // Conversores referenciados (pt_br preferido, en de reserva por arquivo).
+    let mut conv_ids: HashSet<String> = HashSet::new();
+    for e in &entries {
+        for p in &e.params {
+            if let Some(c) = &p.converter {
+                conv_ids.insert(c.clone());
+            }
+        }
+    }
+    let mut converters = HashMap::new();
+    for id in conv_ids {
+        let fname = format!("{id}.xml");
+        let xml = std::fs::read_to_string(conv_dir.join(&fname))
+            .or_else(|_| std::fs::read_to_string(conv_dir_en.join(&fname)));
+        if let Ok(xml) = xml {
+            converters.insert(id.clone(), did::parse_converter(&xml, &id));
+        }
+    }
+
+    Ok(did::Catalog {
+        entries,
+        converters,
+    })
 }
 
 /// Carrega o help de DTC do idioma disponível (pt_br > en), só para os códigos
@@ -205,4 +372,5 @@ pub struct ImportSummary {
     pub ccf_options: usize,
     pub dtc_texts: usize,
     pub dtc_help: usize,
+    pub did_params: usize,
 }

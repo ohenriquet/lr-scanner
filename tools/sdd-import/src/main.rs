@@ -50,6 +50,12 @@ enum Command {
         /// Idioma preferido (pt, en, ...).
         #[arg(long, default_value = "pt")]
         lang: String,
+        /// Tipo de motor para desempatar live data (ex.: V6DIESEL).
+        #[arg(long)]
+        engine: Option<String>,
+        /// Subtipo de motor (ex.: 3L).
+        #[arg(long)]
+        engine_sub: Option<String>,
         /// Caminho do pacote SQLite de saída.
         #[arg(long)]
         out: PathBuf,
@@ -87,6 +93,18 @@ enum Command {
         #[arg(long)]
         code: String,
     },
+    /// Lista o live data (DIDs legíveis) de um módulo, com escala e unidade.
+    DidDump {
+        /// Pacote SQLite.
+        #[arg(long)]
+        pack: PathBuf,
+        /// Sigla do módulo (ex.: PCM). Sem isso, resume por módulo.
+        #[arg(long)]
+        module: Option<String>,
+        /// Filtra por substring no nome do parâmetro (ex.: temperatura).
+        #[arg(long)]
+        filter: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -110,6 +128,8 @@ fn main() -> Result<()> {
             year,
             my,
             lang,
+            engine,
+            engine_sub,
             out,
         } => {
             let model_year = my.unwrap_or_else(|| derive_my(&year));
@@ -118,11 +138,13 @@ fn main() -> Result<()> {
                 model_year,
                 year_code: year,
                 langs: lang_order(&lang),
+                engine,
+                engine_sub,
             };
             let summary = sdd_data::import_vehicle(&install, &spec, &out)
                 .with_context(|| format!("importar {} {}", spec.model, spec.year_code))?;
             tracing::info!(
-                "pacote gravado em {}: {} módulos, {} redes, {} blocos CCF, {} parâmetros, {} opções, {} textos de DTC, {} DTCs com help",
+                "pacote gravado em {}: {} módulos, {} redes, {} blocos CCF, {} parâmetros, {} opções, {} textos de DTC, {} DTCs com help, {} parâmetros de live data",
                 out.display(),
                 summary.modules,
                 summary.networks,
@@ -131,6 +153,7 @@ fn main() -> Result<()> {
                 summary.ccf_options,
                 summary.dtc_texts,
                 summary.dtc_help,
+                summary.did_params,
             );
             Ok(())
         }
@@ -142,7 +165,110 @@ fn main() -> Result<()> {
             all,
         } => cmd_ccf_decode(&pack, &ccf, filter.as_deref(), all),
         Command::DtcHelp { pack, code } => cmd_dtc_help(&pack, &code),
+        Command::DidDump {
+            pack,
+            module,
+            filter,
+        } => cmd_did_dump(&pack, module.as_deref(), filter.as_deref()),
     }
+}
+
+/// Lista o live data de um pacote: resumo por módulo, ou os DIDs de um módulo.
+fn cmd_did_dump(pack: &std::path::Path, module: Option<&str>, filter: Option<&str>) -> Result<()> {
+    let conn = Connection::open(pack).with_context(|| format!("abrir {}", pack.display()))?;
+
+    let Some(module) = module else {
+        // Resumo por módulo.
+        let mut stmt = conn.prepare(
+            "SELECT module, COUNT(DISTINCT id) AS dids,
+                    (SELECT COUNT(*) FROM did_param p WHERE p.did_ref IN
+                        (SELECT id FROM did d2 WHERE d2.module = d.module)) AS params
+             FROM did d GROUP BY module ORDER BY module",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })?;
+        println!("Live data por módulo (DID = leitura UDS 0x22):");
+        for row in rows {
+            let (m, dids, params) = row?;
+            println!("  {m:<6} {dids:>4} DIDs, {params:>5} parâmetros");
+        }
+        return Ok(());
+    };
+
+    let module = module.to_uppercase();
+    let mut stmt = conn.prepare(
+        "SELECT d.did, p.name, p.byte_lsb, p.byte_msb, p.mask, p.bit_level,
+                p.kind, p.unit, p.multiplier, p.offset, p.offset_first, p.converter
+         FROM did d JOIN did_param p ON p.did_ref = d.id
+         WHERE d.module = ?1
+         ORDER BY d.did, p.ord",
+    )?;
+    let rows = stmt.query_map([&module], |r| {
+        Ok(DidRow {
+            did: r.get::<_, i64>(0)? as u16,
+            name: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            kind: r.get::<_, Option<String>>(6)?,
+            unit: r.get::<_, Option<String>>(7)?,
+            mult: r.get::<_, Option<f64>>(8)?,
+            off: r.get::<_, Option<f64>>(9)?,
+            off_first: r.get::<_, Option<i64>>(10)?.unwrap_or(1) != 0,
+            bit: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
+            lsb: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            msb: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+        })
+    })?;
+
+    let mut n = 0;
+    for row in rows {
+        let r = row?;
+        if let Some(f) = filter {
+            if !r.name.to_lowercase().contains(&f.to_lowercase()) {
+                continue;
+            }
+        }
+        n += 1;
+        let scale = match r.kind.as_deref() {
+            Some("enum") => " (enum)".to_string(),
+            Some("linear") => {
+                let unit = r.unit.as_deref().unwrap_or("");
+                let m = r.mult.unwrap_or(1.0);
+                let o = r.off.unwrap_or(0.0);
+                let formula = if r.off_first {
+                    format!("(raw+{o})*{m}")
+                } else {
+                    format!("raw*{m}+{o}")
+                };
+                format!(" = {formula} {unit}")
+            }
+            _ => String::new(),
+        };
+        let loc = if r.bit {
+            format!("byte {}..{} bits", r.lsb, r.msb)
+        } else {
+            format!("byte {}..{}", r.lsb, r.msb)
+        };
+        println!("  0x{:04X}  {:<42} [{}]{}", r.did, r.name, loc, scale);
+    }
+    println!("\n{n} parâmetros em {module}.");
+    Ok(())
+}
+
+struct DidRow {
+    did: u16,
+    name: String,
+    kind: Option<String>,
+    unit: Option<String>,
+    mult: Option<f64>,
+    off: Option<f64>,
+    off_first: bool,
+    bit: bool,
+    lsb: i64,
+    msb: i64,
 }
 
 /// Imprime o help de diagnóstico de um DTC a partir de um pacote.

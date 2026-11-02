@@ -22,6 +22,8 @@ fn import_tmp(install: &SddInstall) -> (Connection, tempdir_guard::TempFile) {
         model_year: "MY10".into(),
         year_code: "201000".into(),
         langs: vec!["ptb".into(), "ptg".into(), "eng".into()],
+        engine: Some("V6DIESEL".into()),
+        engine_sub: Some("3L".into()),
     };
     sdd_data::import_vehicle(install, &spec, tmp.path()).expect("importar L319 MY10");
     (Connection::open(tmp.path()).unwrap(), tmp)

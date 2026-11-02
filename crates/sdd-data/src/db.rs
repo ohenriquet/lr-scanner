@@ -8,6 +8,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use crate::ccf::CcfData;
+use crate::did::{Catalog as DidCatalog, ConverterKind};
 use crate::dtc::DtcText;
 use crate::dtc_help::DtcHelp;
 use crate::model::CcfRole;
@@ -114,6 +115,45 @@ CREATE TABLE dtc_help (
     text    TEXT NOT NULL      -- texto (pt_br quando disponível)
 );
 CREATE INDEX idx_dtchelp_code ON dtc_help(code);
+
+-- Live data: DIDs legíveis por módulo (UDS 0x22) e seus parâmetros.
+CREATE TABLE did (
+    id        INTEGER PRIMARY KEY,
+    module    TEXT NOT NULL,     -- sigla do módulo (ex.: PCM)
+    did       INTEGER NOT NULL,  -- identificador 0x22 (16 bits)
+    data_size INTEGER,           -- tamanho do dado do DID em bytes
+    qual      INTEGER,           -- 1 módulo, 2 módulo+modelo+ano+motor
+    vtype     TEXT,              -- motor (quando qualificado)
+    subtype   TEXT
+);
+CREATE INDEX idx_did_module ON did(module);
+
+CREATE TABLE did_param (
+    did_ref      INTEGER NOT NULL REFERENCES did(id),
+    ord          INTEGER NOT NULL,
+    name         TEXT,
+    byte_lsb     INTEGER,         -- índice do byte menos signif. no dado
+    byte_msb     INTEGER,
+    mask         INTEGER,         -- 0 = sem máscara
+    shift        INTEGER,         -- deslocamento de bits
+    bit_level    INTEGER,         -- 1 = empacotado em bits
+    converter    TEXT,            -- id do conversor (CVT_*/CNV_*)
+    kind         TEXT,            -- linear | enum
+    unit         TEXT,
+    quantity     TEXT,
+    multiplier   REAL,
+    offset       REAL,
+    offset_first INTEGER          -- 1: (raw+offset)*mult ; 0: raw*mult+offset
+);
+CREATE INDEX idx_didparam_ref ON did_param(did_ref);
+
+CREATE TABLE did_enum (
+    converter TEXT NOT NULL,      -- id do conversor
+    low       INTEGER,            -- faixa de valor (inclusive)
+    high      INTEGER,
+    label     TEXT                -- rótulo do estado
+);
+CREATE INDEX idx_didenum_conv ON did_enum(converter);
 "#;
 
 /// Cria (ou recria) o pacote SQLite e grava todos os dados.
@@ -123,6 +163,7 @@ pub fn write_pack(
     ccf: &CcfData,
     dtc_texts: &[DtcText],
     dtc_help: &[DtcHelp],
+    did_catalog: &DidCatalog,
     resolver: &mut TextResolver,
 ) -> Result<(), crate::DataError> {
     if out_db.exists() {
@@ -264,6 +305,79 @@ pub fn write_pack(
             for (section, items) in h.sections() {
                 for (i, text) in items.iter().enumerate() {
                     stmt.execute(params![h.code, section, i as i64, text])?;
+                }
+            }
+        }
+    }
+
+    // live data: did + did_param (com a escala do conversor embutida) + did_enum.
+    {
+        let mut enums_written: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut stmt_enum =
+            tx.prepare("INSERT INTO did_enum (converter, low, high, label) VALUES (?,?,?,?)")?;
+        let mut stmt_did = tx.prepare(
+            "INSERT INTO did (id, module, did, data_size, qual, vtype, subtype) VALUES (?,?,?,?,?,?,?)",
+        )?;
+        let mut stmt_param = tx.prepare(
+            "INSERT INTO did_param
+             (did_ref, ord, name, byte_lsb, byte_msb, mask, shift, bit_level,
+              converter, kind, unit, quantity, multiplier, offset, offset_first)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )?;
+        for (i, e) in did_catalog.entries.iter().enumerate() {
+            let did_id = (i + 1) as i64;
+            let module = e.module.as_deref().unwrap_or("");
+            stmt_did.execute(params![
+                did_id,
+                module,
+                e.did,
+                e.data_size,
+                e.qual as u8 as i64,
+                e.vtype,
+                e.subtype,
+            ])?;
+            for (j, p) in e.params.iter().enumerate() {
+                let conv = p.converter.as_deref().and_then(|c| did_catalog.converters.get(c));
+                let (kind, unit, quantity, mult, off, off_first) = match conv {
+                    Some(c) => (
+                        Some(match c.kind {
+                            ConverterKind::Linear => "linear",
+                            ConverterKind::Enum => "enum",
+                        }),
+                        c.unit.clone(),
+                        c.quantity.clone(),
+                        Some(c.multiplier),
+                        Some(c.offset),
+                        Some(c.offset_first as i64),
+                    ),
+                    None => (None, None, None, None, None, None),
+                };
+                stmt_param.execute(params![
+                    did_id,
+                    j as i64,
+                    p.name,
+                    p.byte_lsb,
+                    p.byte_msb,
+                    p.mask,
+                    p.shift,
+                    p.bit_level as i64,
+                    p.converter,
+                    kind,
+                    unit,
+                    quantity,
+                    mult,
+                    off,
+                    off_first,
+                ])?;
+                // Estados de enum: uma vez por conversor.
+                if let Some(c) = conv {
+                    if c.kind == ConverterKind::Enum
+                        && enums_written.insert(c.id.as_str())
+                    {
+                        for (low, high, label) in &c.states {
+                            stmt_enum.execute(params![c.id, low, high, label])?;
+                        }
+                    }
                 }
             }
         }
