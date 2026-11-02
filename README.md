@@ -11,21 +11,40 @@ medida que são validados.
 
 ## Estado atual
 
-Em desenvolvimento inicial. Ver o plano em
-`../../.claude/plans/` e o progresso por fase abaixo.
+Leitura e diagnóstico **funcionam no carro real** (validado num L319 MY12). A
+**gravação do CCF** está bloqueada por um binário proprietário da JLR (o SBL) —
+ver "Bloqueio conhecido" abaixo.
 
-| Fase | Entrega | Estado |
+| Área | Entrega | Estado |
 |---|---|---|
-| 0 | Ambiente + repositório | feito |
-| 1 | `sdd-crypto` (codec `.exml`) | feito |
-| 1 | `sdd-data` + `sdd-import` (parsers → SQLite) | feito |
-| 2 | `j2534` + shim gravador (Windows) | pendente |
-| 3 | `mongoose` (protocolo USB nativo) | pendente |
-| 4 | `diag` (UDS, leitura no carro) | pendente |
-| 5 | `ccf` (edição de configuração) | pendente |
-| 6 | `procedures` (rotinas de serviço) | pendente |
-| 7 | app Flutter | pendente |
-| 8 | expansão a todos os veículos | pendente |
+| `sdd-crypto` | codec `.exml` (3DES) | ✅ |
+| `sdd-data` / `sdd-import` | parsers → SQLite, `decrypt` de `.exml` | ✅ |
+| `mongoose` | protocolo USB/serial nativo do adaptador | ✅ |
+| `diag` | UDS/ISO-TP: VIN, scan de módulos, DTCs c/ help, live data | ✅ no carro |
+| `ccf` (leitura) | ler + decodificar o CCF do BCM | ✅ no carro |
+| `ccf` (gravação) | editar e gravar o CCF | ⛔ bloqueado (SBL) |
+| app Flutter | UI multiplataforma + ponte FFI/HTTP | 🚧 web ok; Windows nativo / Android / macOS em andamento |
+| `j2534-shim` | capturar o SDD gravando (destrava o CCF) | 🚧 planejado |
+| `procedures` | rotinas de serviço (DPF, injetores, suspensão…) | ⬜ |
+| expansão | todos os veículos cobertos pelo SDD | ⬜ |
+
+## Bloqueio conhecido: gravação do CCF (ajuda procurada)
+
+Ler e decodificar o CCF (configuração do veículo) do BCM funciona. **Gravar**
+não: o BCM exige que um **Secondary Boot Loader (SBL)** seja baixado para a sua
+RAM antes de aceitar o erase/flash da região de config — sem ele, o erase
+responde `7F 31 22` (conditionsNotCorrect), mesmo com sessão de programação e
+segurança corretas. Esse SBL **não vem no SDD local**: o SDD o busca no servidor
+online da JLR (TOPIx) na hora da gravação. A investigação completa (RE das DLLs,
+testes no carro, dados decifrados) está em
+[`docs/security-ccf-write.md`](docs/security-ccf-write.md).
+
+**Help wanted (EN):** writing the CCF on an L319 (EUCD) BCM needs JLR's Secondary
+Boot Loader (SBL), delivered from JLR online — it is not in a local SDD install.
+Everything else (reading/decoding the CCF, DTCs, live data, security access)
+works. If you have the **L319 BCM SBL VBF**, or a **J2534 capture of SDD writing
+a CCF**, please open an issue — that single piece is what's needed to finish
+offline CCF writing.
 
 ## Princípio sobre dados e direitos
 
