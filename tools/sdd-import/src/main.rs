@@ -108,6 +108,15 @@ enum Command {
         #[arg(long)]
         filter: Option<String>,
     },
+    /// Exporta um pacote para JSON (consumido pelo app Flutter).
+    PackExport {
+        /// Pacote SQLite.
+        #[arg(long)]
+        pack: PathBuf,
+        /// Arquivo JSON de saída.
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -177,7 +186,160 @@ fn main() -> Result<()> {
             module,
             filter,
         } => cmd_did_dump(&pack, module.as_deref(), filter.as_deref()),
+        Command::PackExport { pack, out } => cmd_pack_export(&pack, &out),
     }
+}
+
+/// Exporta o pacote para um JSON compacto que o app Flutter carrega.
+fn cmd_pack_export(pack: &std::path::Path, out: &std::path::Path) -> Result<()> {
+    use serde_json::{json, Map, Value};
+    let conn = Connection::open(pack).with_context(|| format!("abrir {}", pack.display()))?;
+
+    // vehicle
+    let vehicle = conn.query_row(
+        "SELECT model, model_year, year_code, platform_name FROM vehicle LIMIT 1",
+        [],
+        |r| {
+            Ok(json!({
+                "model": r.get::<_, String>(0)?,
+                "model_year": r.get::<_, String>(1)?,
+                "year_code": r.get::<_, String>(2)?,
+                "platform": r.get::<_, Option<String>>(3)?,
+            }))
+        },
+    )?;
+
+    // modules
+    let mut mstmt = conn.prepare(
+        "SELECT acronym, name, tx_diag, rx_diag, network, fitment FROM module ORDER BY acronym",
+    )?;
+    let modules: Vec<Value> = mstmt
+        .query_map([], |r| {
+            Ok(json!({
+                "acronym": r.get::<_, String>(0)?,
+                "name": r.get::<_, Option<String>>(1)?,
+                "tx": r.get::<_, Option<i64>>(2)?,
+                "rx": r.get::<_, Option<i64>>(3)?,
+                "network": r.get::<_, Option<String>>(4)?,
+                "fitment": r.get::<_, Option<String>>(5)?,
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // live data por módulo
+    let mut lstmt = conn.prepare(
+        "SELECT d.module, d.did, p.name, p.unit, p.kind, p.multiplier, p.offset,
+                p.offset_first, p.bit_level, p.byte_lsb, p.byte_msb, p.source
+         FROM did d JOIN did_param p ON p.did_ref = d.id
+         ORDER BY d.module, d.did, p.ord",
+    )?;
+    let mut live: Map<String, Value> = Map::new();
+    let rows = lstmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, Option<String>>(2)?,
+            r.get::<_, Option<String>>(3)?,
+            r.get::<_, Option<String>>(4)?,
+            r.get::<_, Option<f64>>(5)?,
+            r.get::<_, Option<f64>>(6)?,
+            r.get::<_, Option<i64>>(7)?,
+            r.get::<_, Option<i64>>(8)?,
+            r.get::<_, Option<i64>>(9)?,
+            r.get::<_, Option<i64>>(10)?,
+            r.get::<_, Option<String>>(11)?,
+        ))
+    })?;
+    for row in rows.filter_map(|r| r.ok()) {
+        let (module, did, name, unit, kind, mult, off, off_first, bit, lsb, msb, source) = row;
+        let entry = json!({
+            "did": format!("0x{:04X}", did as u16),
+            "name": name.unwrap_or_default(),
+            "unit": unit,
+            "kind": kind,
+            "mult": mult,
+            "offset": off,
+            "offset_first": off_first.map(|v| v != 0),
+            "bit": bit.map(|v| v != 0),
+            "lsb": lsb,
+            "msb": msb,
+            "source": source,
+        });
+        live.entry(module)
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .unwrap()
+            .push(entry);
+    }
+
+    // dtc_text (code -> desc)
+    let mut tstmt = conn.prepare("SELECT code, description FROM dtc_text ORDER BY code")?;
+    let mut dtc_text: Map<String, Value> = Map::new();
+    for row in tstmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?
+        .filter_map(|r| r.ok())
+    {
+        if let Some(desc) = row.1 {
+            dtc_text.insert(row.0, Value::String(desc));
+        }
+    }
+
+    // dtc_help: code -> module -> {section: [..]}
+    let mut hstmt = conn.prepare(
+        "SELECT code, module, section, text FROM dtc_help ORDER BY code, module, section, ord",
+    )?;
+    let mut dtc_help: Map<String, Value> = Map::new();
+    for row in hstmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+    {
+        let (code, module, section, text) = row;
+        let by_mod = dtc_help
+            .entry(code)
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()
+            .unwrap();
+        let secs = by_mod
+            .entry(module)
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()
+            .unwrap();
+        secs.entry(section)
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .unwrap()
+            .push(Value::String(text));
+    }
+
+    let doc = json!({
+        "vehicle": vehicle,
+        "modules": modules,
+        "live": live,
+        "dtc_text": dtc_text,
+        "dtc_help": dtc_help,
+    });
+    let s = serde_json::to_string(&doc)?;
+    std::fs::write(out, &s).with_context(|| format!("gravar {}", out.display()))?;
+    tracing::info!(
+        "exportado {} ({} módulos, {} grupos de live data, {} textos de DTC, {} códigos com help, {:.1} MB)",
+        out.display(),
+        doc["modules"].as_array().map_or(0, |a| a.len()),
+        doc["live"].as_object().map_or(0, |o| o.len()),
+        doc["dtc_text"].as_object().map_or(0, |o| o.len()),
+        doc["dtc_help"].as_object().map_or(0, |o| o.len()),
+        s.len() as f64 / 1e6,
+    );
+    Ok(())
 }
 
 /// Lista o live data de um pacote: resumo por módulo, ou os DIDs de um módulo.

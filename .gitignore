@@ -38,3 +38,6 @@ captures/
 
 # Renders de carro (terceiros, Chrome Data): baixados por app/assets/car/fetch.sh
 app/assets/car/*.jpg
+app/jlr_app/assets/car/*.jpg
+# Pacote exportado (derivado da instalação JLR): gerar com sdd-import pack-export
+app/jlr_app/assets/pack.json
