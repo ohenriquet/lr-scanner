@@ -34,6 +34,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Decifra um `.exml` (3DES) e imprime (ou grava) o XML em claro.
+    Decrypt {
+        /// Caminho do arquivo .exml.
+        #[arg(long)]
+        file: PathBuf,
+        /// Saída (padrão: imprime no stdout).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Lista os veículos+ano disponíveis na instalação.
     List,
     /// Importa um veículo+ano para um pacote SQLite.
@@ -134,6 +143,22 @@ fn main() -> Result<()> {
     };
 
     match cli.cmd {
+        Command::Decrypt { file, out } => {
+            let bytes = std::fs::read(&file).with_context(|| format!("ler {}", file.display()))?;
+            let xml = sdd_crypto::decrypt(&bytes)
+                .map_err(|e| anyhow::anyhow!("decifrar {}: {e}", file.display()))?;
+            match out {
+                Some(p) => {
+                    std::fs::write(&p, &xml).with_context(|| format!("gravar {}", p.display()))?;
+                    eprintln!("gravado {} ({} bytes)", p.display(), xml.len());
+                }
+                None => {
+                    use std::io::Write;
+                    std::io::stdout().write_all(&xml).ok();
+                }
+            }
+            Ok(())
+        }
         Command::List => cmd_list(&install),
         Command::Vehicle {
             model,

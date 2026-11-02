@@ -151,3 +151,34 @@ diag), ou exigir DC0165. O comando `ccf-flash` em modo PROBE (sem `--write`)
 roda 1→3 e já mostra a resposta do `31 01 800E`: `71` = armado; `7F 31 33` =
 nível de segurança diferente (tentar DC0165 antes do 800E); `7F 31 xx` = outro.
 Isso é não-destrutivo (não apaga nada), então é o primeiro teste no carro.
+
+## ATUALIZAÇÃO (teste no carro + dados decifrados): 0x800E DESCARTADO
+
+O probe no carro deu **`31 01 800E` → `7F 31 31` (requestOutOfRange)**: este BCM
+não tem esse routineId (o `0x800E` do `InitiateProgrammingEnableMode` é de outra
+plataforma). Desbloqueio diagnóstico 100% (seed→key ok). Nada foi gravado.
+
+Decifrando os dados do SDD (via o novo `sdd-import decrypt`):
+- `IDS/Xml/L319_201200/BCM.exml` (SWDL): `SOFTWARE_DOWNLOAD_PHASE=3` (spec
+  "SWDL-004"), `SECURITY_ALGORITHM_ID=0`, `KEY_CONST_REF=168`,
+  `READ_ECU_SERIAL_NO=1`. **Não há `PROGRAMMING_ENABLE_MODE`**.
+- `IDS/Xml/L319_201200/MDX_BCM.exml`: a tabela `ROUTINE_IDENTIFIERS` do BCM NÃO
+  contém `FF00`. Ou seja, **o erase FF00 é rotina de BOOTLOADER**, não de
+  aplicação. Daí `conditionsNotCorrect` (reconhecida, mas o módulo não está
+  realmente em modo de programação) em vez de `requestOutOfRange`. As rotinas de
+  aplicação (0202 Self Test, 716E "Start Control Unit Program" no cluster
+  PATS/chave, etc.) são todas de sessão estendida (session_03).
+
+**Conclusão corrigida:** `10 02` responde `0x50`, mas o BCM não entra de fato no
+bootloader. O candidato mais forte (strings do SessionCcf.dll: "Initialise bus
+with Programming Sessions" / "2 sec burst of Prog Sessions") é **martelar `10 02`
+por ~2 s** para forçar a entrada — hoje mandávamos uma vez. Implementado em
+`ccf-flash` (burst por padrão; `--no-preamble` desliga; `--start-routine <hex>`
+roda uma rotina na sessão ESTENDIDA, p/ testar p.ex. 716E na sessão certa).
+Como o erase auto-aborta se negado, testar `--write` é seguro.
+
+**Se o burst não resolver:** o caminho definitivo é a captura via shim J2534
+(Fase 2) — observar o SDD gravando um CCF e copiar a sequência exata.
+
+Ferramenta nova: `sdd-import decrypt --file X.exml --out Y.xml` decifra qualquer
+`.exml` (3DES) com a chave do crate `sdd-crypto`.

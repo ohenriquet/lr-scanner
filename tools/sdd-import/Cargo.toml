@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 sdd-data = { path = "../../crates/sdd-data" }
+sdd-crypto = { path = "../../crates/sdd-crypto" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

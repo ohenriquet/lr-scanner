@@ -236,10 +236,9 @@ enum Command {
         /// Confirmação obrigatória quando --write.
         #[arg(long)]
         yes: bool,
-        /// NÃO roda a rotina de "Programming Enable" (31 01 800E) na sessão
-        /// estendida antes de entrar na sessão de programação. Por padrão ela É
-        /// executada — é a precondição que o SDD usa (RE do SessionCcf.dll) e
-        /// sem ela o erase do BCM responde 7F 31 22 (conditionsNotCorrect).
+        /// NÃO faz o burst de sessão de programação (martelar 10 02 por ~2 s
+        /// antes do erase). Por padrão o burst É feito — é o quirk JLR
+        /// ("2 sec burst of Prog Sessions") candidato à precondição do erase.
         #[arg(long)]
         no_preamble: bool,
     },
@@ -613,6 +612,29 @@ fn prog_unlock_bcm_sw<T: Transport<Error: 'static>>(
     Ok(kr.first() == Some(&0x67))
 }
 
+/// Martela DiagnosticSessionControl de programação (10 02) por `ms` milissegundos.
+/// Quirk JLR ("2 sec burst of Prog Sessions"): num barramento com gateway, um
+/// único 10 02 é aceito mas pode não levar o módulo ao bootloader; o burst força
+/// a entrada. Mantém a sessão viva até a segurança/erase que vêm logo depois.
+fn prog_session_burst<T: Transport<Error: 'static>>(
+    dev: &mut Device<T>,
+    ms: u64,
+) -> Result<()> {
+    let start = std::time::Instant::now();
+    let mut n = 0u32;
+    let mut ok = 0u32;
+    while start.elapsed() < Duration::from_millis(ms) {
+        let r = sw_uds(dev, &[0x10, 0x02], 300)?;
+        n += 1;
+        if r.first() == Some(&0x50) {
+            ok += 1;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    println!("Burst de programação: {ok}/{n} respostas 0x50 em {ms} ms.");
+    Ok(())
+}
+
 /// Monta um UDS com endereço+tamanho no formato 0x44 (4 bytes cada).
 fn alfid44(service: u8, sub: &[u8], addr: u32, len: u32) -> Vec<u8> {
     let mut v = vec![service];
@@ -648,9 +670,6 @@ fn ccf_flash<T: Transport<Error: 'static>>(
     const ADDR: u32 = 0x00FF_AC00;
     const ERASE_LEN: u32 = 0x0400; // 1024
     const CFG_LEN: usize = 698;
-    // Rotina de "Programming Enable / Enabling SWDL Mode" que arma o BCM para o
-    // erase. Descoberta por RE de SessionCcf.dll (InitiateProgrammingEnableMode).
-    const PROG_ENABLE_ROUTINE: u16 = 0x800E;
 
     // 1) Lê o CCF atual (baseline + backup).
     let current = read_ccf_sw(dev)?;
@@ -689,50 +708,34 @@ fn ccf_flash<T: Transport<Error: 'static>>(
         "não desbloqueou a sessão diagnóstica"
     );
 
-    // 3b) PROGRAMMING ENABLE — a precondição do erase, confirmada por RE do
-    // SessionCcf.dll (CSessionCcf::InitiateProgrammingEnableMode). Ainda na
-    // sessão ESTENDIDA (10 03) e com a segurança diagnóstica já aberta, o SDD
-    // roda RoutineControl 31 01 800E (startRoutine, routineId 0x800E = "Enabling
-    // SWDL Mode"). É o que arma o BCM para aceitar o erase quando se entra na
-    // sessão de programação; sem isto o erase responde 7F 31 22
-    // (conditionsNotCorrect), exatamente o que víamos. Só então entra em 10 02.
-    if preamble {
-        let req = vec![
-            0x31,
-            0x01,
-            (PROG_ENABLE_ROUTINE >> 8) as u8,
-            (PROG_ENABLE_ROUTINE & 0xff) as u8,
-        ];
-        println!(
-            "PROGRAMMING ENABLE (routineId {:#06X}): {}",
-            PROG_ENABLE_ROUTINE,
-            hexdump(&req)
-        );
+    // 3b) Rotina opcional na sessão ESTENDIDA (session_03) — onde o MDX do BCM
+    // define TODAS as rotinas de aplicação. O erase FF00 NÃO está no MDX (é
+    // rotina de BOOTLOADER), por isso responde conditionsNotCorrect até o módulo
+    // entrar de fato em modo de programação. Use --start-routine p/ testar aqui,
+    // na sessão certa, p.ex. 716E "Start Control Unit Program".
+    if let Some(rid) = start_routine {
+        let req = vec![0x31, 0x01, (rid >> 8) as u8, (rid & 0xff) as u8];
+        println!("RoutineControl (sessão estendida) {rid:#06X}: {}", hexdump(&req));
         let r = sw_uds(dev, &req, 5000)?;
-        println!(
-            "  resposta: {}{}",
-            hexdump(&r),
-            if r.first() == Some(&0x71) {
-                "  [OK — SWDL armado]"
-            } else {
-                "  [ver resposta; se 7F 31 xx o erase deve falhar]"
-            }
-        );
+        println!("  resposta: {}", hexdump(&r));
     }
 
-    // 3c) Desbloqueio de programação (10 02 + segurança de programação DC0163).
+    // 3c) BURST de sessão de programação — quirk JLR confirmado nas strings do
+    // SessionCcf.dll: "Initialise bus with Programming Sessions" / "2 sec burst
+    // of Prog Sessions". Um único 10 02 é ACEITO (responde 0x50), mas num
+    // barramento com gateway pode não levar o BCM ao bootloader de verdade;
+    // martelar 10 02 por ~2 s força a entrada. É o principal candidato à
+    // precondição que falta para o erase (hoje mandamos só uma vez).
+    if preamble {
+        prog_session_burst(dev, 2000)?;
+    }
+
+    // 3d) Desbloqueio de programação (10 02 + segurança de programação DC0163).
     anyhow::ensure!(
         prog_unlock_bcm_sw(dev, prog_const)?,
         "não desbloqueou a segurança de programação"
     );
     println!("Programação desbloqueada.");
-
-    // 4) Rotina opcional antes do flash (ex.: 0x716E Start Control Unit Program).
-    if let Some(rid) = start_routine {
-        let req = vec![0x31, 0x01, (rid >> 8) as u8, (rid & 0xff) as u8];
-        let r = sw_uds(dev, &req, 5000)?;
-        println!("RoutineControl start {rid:#06X}: {}", hexdump(&r));
-    }
 
     if !write {
         // PROBE não-destrutivo: tenta RequestDownload (sem erase/transfer).

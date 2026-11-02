@@ -578,6 +578,7 @@ dependencies = [
  "anyhow",
  "clap",
  "rusqlite",
+ "sdd-crypto",
  "sdd-data",
  "serde_json",
  "tracing",
