@@ -5,6 +5,8 @@ members = [
   "crates/sdd-data",
   "crates/mongoose",
   "crates/jlr-security",
+  "crates/diag",
+  "crates/bridge",
   "tools/sdd-import",
   "tools/mongoose-bench",
   "tools/car-scan",

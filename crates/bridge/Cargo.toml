@@ -1,0 +1,14 @@
+[package]
+name = "jlr-bridge"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "Ponte C-ABI (dart:ffi) entre o app Flutter e o núcleo de diagnóstico."
+
+[lib]
+name = "jlr_bridge"
+crate-type = ["cdylib"]
+
+[dependencies]
+diag = { path = "../diag" }
+serde_json = { workspace = true }

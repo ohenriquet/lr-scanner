@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'car_link.dart';
 import 'pack.dart';
 import 'screens.dart';
 import 'theme.dart';
@@ -182,18 +183,24 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _notConnected(BuildContext context) {
+    final native = CarLink.available;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: C.panel,
         title: const Text('Conexão com o carro'),
-        content: const Text(
-          'A leitura ao vivo (VIN, falhas ativas, valores de sensor, CCF atual) '
-          'vem do carro pelo adaptador Mongoose. A ponte nativa (FFI, serial no '
-          'desktop / USB-OTG no Android) é a próxima etapa.\n\nAgora você vê os '
-          'dados do pacote do veículo: módulos, catálogo de live data e a '
-          'referência de falhas com o help do SDD por módulo.',
-          style: TextStyle(color: C.ink2),
+        content: Text(
+          native
+              ? 'Ponte nativa disponível neste alvo. Informe a porta do Mongoose '
+                  '(ex.: COM5) para conectar e ler VIN, módulos, falhas ativas e '
+                  'os valores ao vivo — fluxo em construção.'
+              : 'Esta é a versão web (sem acesso a hardware). A leitura do carro '
+                  '(VIN, falhas ativas, valores de sensor, CCF atual) exige o app '
+                  'nativo (Windows/macOS/Android), que fala com o Mongoose pela '
+                  'ponte FFI.\n\nAqui você vê os dados do pacote do veículo: '
+                  'módulos, catálogo de live data e a referência de falhas com o '
+                  'help do SDD por módulo.',
+          style: const TextStyle(color: C.ink2),
         ),
         actions: [
           TextButton(
