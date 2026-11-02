@@ -8,6 +8,7 @@
 pub mod ccf;
 pub mod db;
 pub mod dtc;
+pub mod dtc_help;
 pub mod model;
 pub mod platform;
 pub mod text;
@@ -63,6 +64,16 @@ impl SddInstall {
     /// Arquivo global de descrições de DTC (`IDS\Xml\gdx.xml`, texto plano).
     pub fn gdx_path(&self) -> PathBuf {
         self.xml_dir().join("gdx.xml")
+    }
+
+    /// Pasta de dados por idioma (`Common\SDD\Data`).
+    pub fn sdd_data_dir(&self) -> PathBuf {
+        self.root.join("Common").join("SDD").join("Data")
+    }
+
+    /// Pasta do help de DTC para um idioma (`Common\SDD\Data\<lang>\rds-dtc-help`).
+    pub fn rds_dtc_help_dir(&self, lang: &str) -> PathBuf {
+        self.sdd_data_dir().join(lang).join("rds-dtc-help")
     }
 
     /// Existe de fato?
@@ -134,6 +145,10 @@ pub fn import_vehicle(
         Vec::new()
     };
 
+    // Help de diagnóstico por DTC (pt_br preferido, en de reserva). Só os
+    // códigos que se aplicam a este modelo entram no pacote.
+    let dtc_help = load_dtc_help(install, &spec.model)?;
+
     let summary = ImportSummary {
         modules: platform.modules.len(),
         networks: platform.networks.len(),
@@ -141,11 +156,43 @@ pub fn import_vehicle(
         ccf_params: ccf.params.len(),
         ccf_options: ccf.params.iter().map(|p| p.options.len()).sum(),
         dtc_texts: dtc_texts.len(),
+        dtc_help: dtc_help.len(),
     };
 
-    db::write_pack(out_db, &platform, &ccf, &dtc_texts, &mut resolver)?;
+    db::write_pack(out_db, &platform, &ccf, &dtc_texts, &dtc_help, &mut resolver)?;
 
     Ok(summary)
+}
+
+/// Carrega o help de DTC do idioma disponível (pt_br > en), só para os códigos
+/// que se aplicam ao `model`. Pasta ausente -> vazio (os DTCs ficam sem help).
+fn load_dtc_help(install: &SddInstall, model: &str) -> Result<Vec<dtc_help::DtcHelp>, DataError> {
+    let lang = ["pt_br", "en"]
+        .into_iter()
+        .find(|l| install.rds_dtc_help_dir(l).is_dir());
+    let Some(lang) = lang else {
+        return Ok(Vec::new());
+    };
+    let dir = install.rds_dtc_help_dir(lang);
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| DataError::Io(dir.clone(), e))? {
+        let entry = entry.map_err(|e| DataError::Io(dir.clone(), e))?;
+        let path = entry.path();
+        let is_help = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|n| n.starts_with("rdsDtcHelp") && n.ends_with(".xml"));
+        if !is_help {
+            continue;
+        }
+        let Ok(xml) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(h) = dtc_help::parse(&xml, Some(model))? {
+            out.push(h);
+        }
+    }
+    Ok(out)
 }
 
 /// Contagens de uma importação, para log e verificação.
@@ -157,4 +204,5 @@ pub struct ImportSummary {
     pub ccf_params: usize,
     pub ccf_options: usize,
     pub dtc_texts: usize,
+    pub dtc_help: usize,
 }

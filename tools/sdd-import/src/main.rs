@@ -78,6 +78,15 @@ enum Command {
         #[arg(long)]
         all: bool,
     },
+    /// Mostra o help de diagnóstico de um DTC (descrição, sintomas, causas, ações).
+    DtcHelp {
+        /// Pacote SQLite.
+        #[arg(long)]
+        pack: PathBuf,
+        /// Código do DTC (ex.: C1A13).
+        #[arg(long)]
+        code: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -113,7 +122,7 @@ fn main() -> Result<()> {
             let summary = sdd_data::import_vehicle(&install, &spec, &out)
                 .with_context(|| format!("importar {} {}", spec.model, spec.year_code))?;
             tracing::info!(
-                "pacote gravado em {}: {} módulos, {} redes, {} blocos CCF, {} parâmetros, {} opções, {} textos de DTC",
+                "pacote gravado em {}: {} módulos, {} redes, {} blocos CCF, {} parâmetros, {} opções, {} textos de DTC, {} DTCs com help",
                 out.display(),
                 summary.modules,
                 summary.networks,
@@ -121,6 +130,7 @@ fn main() -> Result<()> {
                 summary.ccf_params,
                 summary.ccf_options,
                 summary.dtc_texts,
+                summary.dtc_help,
             );
             Ok(())
         }
@@ -131,7 +141,54 @@ fn main() -> Result<()> {
             filter,
             all,
         } => cmd_ccf_decode(&pack, &ccf, filter.as_deref(), all),
+        Command::DtcHelp { pack, code } => cmd_dtc_help(&pack, &code),
     }
+}
+
+/// Imprime o help de diagnóstico de um DTC a partir de um pacote.
+fn cmd_dtc_help(pack: &std::path::Path, code: &str) -> Result<()> {
+    let conn = Connection::open(pack).with_context(|| format!("abrir {}", pack.display()))?;
+    let code = code.to_uppercase();
+
+    // Descrição curta (gdx), se houver.
+    if let Ok(desc) = conn.query_row(
+        "SELECT description FROM dtc_text WHERE code = ?1",
+        [&code],
+        |r| r.get::<_, String>(0),
+    ) {
+        println!("{code}  {desc}\n");
+    } else {
+        println!("{code}\n");
+    }
+
+    let titles = [
+        ("supp_desc", "Descrição complementar"),
+        ("symptoms", "Sintomas"),
+        ("causes", "Causas prováveis"),
+        ("actions", "Ações recomendadas"),
+    ];
+    let mut found = false;
+    for (sec, title) in titles {
+        let mut stmt =
+            conn.prepare("SELECT text FROM dtc_help WHERE code = ?1 AND section = ?2 ORDER BY ord")?;
+        let rows: Vec<String> = stmt
+            .query_map(rusqlite::params![code, sec], |r| r.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
+        found = true;
+        println!("{title}:");
+        for t in rows {
+            println!("  • {t}");
+        }
+        println!();
+    }
+    if !found {
+        println!("(sem help de diagnóstico para {code} neste pacote)");
+    }
+    Ok(())
 }
 
 /// Deriva um MYxx a partir do ano numérico (ex.: 201000 -> MY10).

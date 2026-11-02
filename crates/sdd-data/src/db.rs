@@ -9,6 +9,7 @@ use rusqlite::{params, Connection};
 
 use crate::ccf::CcfData;
 use crate::dtc::DtcText;
+use crate::dtc_help::DtcHelp;
 use crate::model::CcfRole;
 use crate::platform::Platform;
 use crate::text::TextResolver;
@@ -105,6 +106,14 @@ CREATE TABLE dtc_text (
     code        TEXT NOT NULL,         -- código legível (ex.: C1A13)
     description TEXT                    -- descrição (inglês)
 );
+
+CREATE TABLE dtc_help (
+    code    TEXT NOT NULL,     -- código legível (ex.: C1A13)
+    section TEXT NOT NULL,     -- supp_desc | symptoms | causes | actions
+    ord     INTEGER NOT NULL,  -- ordem dentro da seção
+    text    TEXT NOT NULL      -- texto (pt_br quando disponível)
+);
+CREATE INDEX idx_dtchelp_code ON dtc_help(code);
 "#;
 
 /// Cria (ou recria) o pacote SQLite e grava todos os dados.
@@ -113,6 +122,7 @@ pub fn write_pack(
     platform: &Platform,
     ccf: &CcfData,
     dtc_texts: &[DtcText],
+    dtc_help: &[DtcHelp],
     resolver: &mut TextResolver,
 ) -> Result<(), crate::DataError> {
     if out_db.exists() {
@@ -243,6 +253,19 @@ pub fn write_pack(
         )?;
         for d in dtc_texts {
             stmt.execute(params![d.number, d.code, d.description])?;
+        }
+    }
+
+    // dtc_help (seções por código).
+    {
+        let mut stmt = tx
+            .prepare("INSERT INTO dtc_help (code, section, ord, text) VALUES (?,?,?,?)")?;
+        for h in dtc_help {
+            for (section, items) in h.sections() {
+                for (i, text) in items.iter().enumerate() {
+                    stmt.execute(params![h.code, section, i as i64, text])?;
+                }
+            }
         }
     }
 
