@@ -1,101 +1,103 @@
 # jlr-open-diag
 
-Ferramenta aberta e multiplataforma (Windows 11, macOS, Android) de diagnóstico
-e configuração para veículos Jaguar Land Rover, reimplementando as funções do
-**JLR SDD** (Symptom Driven Diagnostics) sobre o adaptador **Mongoose Pro JLR**
+**English** · [Português](README.pt-BR.md)
+
+Open, cross-platform (Windows 11, macOS, Android) diagnostics and configuration
+tool for Jaguar Land Rover vehicles, reimplementing the functions of the
+**JLR SDD** (Symptom Driven Diagnostics) over the **Mongoose Pro JLR** adapter
 (J2534, USB).
 
-Primeiro alvo validado: **Land Rover Discovery 4 (L319) 3.0 SDV6 diesel**.
-A arquitetura é genérica para toda a cobertura do SDD; outros veículos entram à
-medida que são validados.
+First validated target: **Land Rover Discovery 4 (L319) 3.0 SDV6 diesel**.
+The architecture is generic across the SDD's whole coverage; other vehicles are
+added as they are validated.
 
-> **Beta 0.1** — as quatro plataformas (Windows, macOS, Android, web) compilam;
-> leitura e diagnóstico foram validados no carro real. Binários em
-> **[Releases](../../releases)**. A conexão no **Android é experimental**
-> (USB-OTG, ainda sem validação em dispositivo) e a **gravação do CCF** depende
-> de um binário proprietário da JLR — detalhes abaixo.
+> **Beta 0.1** — all four platforms (Windows, macOS, Android, web) build; reading
+> and diagnostics were validated on a real car. Binaries under
+> **[Releases](../../releases)**. The **Android** connection is **experimental**
+> (USB-OTG, not yet validated on a device) and **CCF writing** depends on a
+> proprietary JLR binary — details below. The app UI is available in **English,
+> Spanish and Portuguese** (language picker in the app bar; follows the system
+> locale by default).
 
-## Estado atual
+## Current status
 
-Leitura e diagnóstico **funcionam no carro real** (validado num L319 MY12). A
-**gravação do CCF** está bloqueada por um binário proprietário da JLR (o SBL) —
-ver "Bloqueio conhecido" abaixo.
+Reading and diagnostics **work on the real car** (validated on an L319 MY12).
+**CCF writing** is blocked by a proprietary JLR binary (the SBL) — see "Known
+blocker" below.
 
-| Área | Entrega | Estado |
+| Area | Deliverable | Status |
 |---|---|---|
-| `sdd-crypto` | codec `.exml` (3DES) | ✅ |
-| `sdd-data` / `sdd-import` | parsers → SQLite, `decrypt` de `.exml` | ✅ |
-| `mongoose` | protocolo USB/serial nativo do adaptador | ✅ |
-| `diag` | UDS/ISO-TP: VIN, scan de módulos, DTCs c/ help, live data | ✅ no carro |
-| `ccf` (leitura) | ler + decodificar o CCF do BCM | ✅ no carro |
-| `ccf` (gravação) | editar e gravar o CCF | ⛔ bloqueado (SBL) |
-| app Flutter | UI (Windows/macOS/Android/web) + ponte FFI/HTTP | ✅ compila nas 4; Windows/macOS/web conectam; Android USB-OTG **experimental** |
-| `j2534-shim` | capturar o SDD gravando (destrava o CCF) | 🚧 planejado |
-| `procedures` | rotinas de serviço (DPF, injetores, suspensão…) | ⬜ |
-| expansão | todos os veículos cobertos pelo SDD | ⬜ |
+| `sdd-crypto` | `.exml` codec (3DES) | ✅ |
+| `sdd-data` / `sdd-import` | parsers → SQLite, `.exml` `decrypt` | ✅ |
+| `mongoose` | native USB/serial protocol of the adapter | ✅ |
+| `diag` | UDS/ISO-TP: VIN, module scan, DTCs with help, live data | ✅ on car |
+| `ccf` (read) | read + decode the BCM CCF | ✅ on car |
+| `ccf` (write) | edit and write the CCF | ⛔ blocked (SBL) |
+| Flutter app | UI (Windows/macOS/Android/web) + FFI/HTTP bridge | ✅ builds on all 4; Windows/macOS/web connect; Android USB-OTG **experimental** |
+| `j2534-shim` | capture SDD writing (unlocks the CCF) | 🚧 planned |
+| `procedures` | service routines (DPF, injectors, suspension…) | ⬜ |
+| expansion | all vehicles covered by the SDD | ⬜ |
 
-## Builds e instalação (beta 0.1)
+## Builds and install (beta 0.1)
 
-Binários da beta em **[Releases](../../releases)**. Para compilar do código
-(carregue o ambiente com `source env.sh` antes):
+Beta binaries under **[Releases](../../releases)**. To build from source (load
+the environment with `source env.sh` first):
 
-- **Windows (nativo):** `bash app/jlr_app/build-windows.sh` → `jlr_sdd.exe`
-  (FFI direto com o Mongoose; requer VS Build Tools com o workload C++).
+- **Windows (native):** `bash app/jlr_app/build-windows.sh` → `jlr_sdd.exe`
+  (direct FFI to the Mongoose; requires VS Build Tools with the C++ workload).
 - **Android (APK):** `bash app/jlr_app/build-android.sh` → `app-release.apk`
-  (requer Android SDK/NDK + `cargo-ndk`; conexão USB-OTG experimental —
-  ver [`app/jlr_app/ANDROID.md`](app/jlr_app/ANDROID.md)).
-- **macOS:** `bash app/jlr_app/build-macos.sh` num Mac
-  (ver [`app/jlr_app/MACOS.md`](app/jlr_app/MACOS.md)).
-- **Web + servidor local:** `run-app.bat` (sobe `car-scan serve` e abre o navegador).
+  (requires Android SDK/NDK + `cargo-ndk`; USB-OTG connection is experimental —
+  see [`app/jlr_app/ANDROID.md`](app/jlr_app/ANDROID.md)).
+- **macOS:** `bash app/jlr_app/build-macos.sh` on a Mac
+  (see [`app/jlr_app/MACOS.md`](app/jlr_app/MACOS.md)).
+- **Web + local server:** `run-app.bat` (starts `car-scan serve` and opens the browser).
 
-O app **não embute dados da JLR**: gere o pacote do seu veículo a partir do
-próprio SDD com `sdd-import` (vira `app/jlr_app/assets/pack.json`).
+The app **does not embed JLR data**: generate your vehicle's pack from your own
+SDD install with `sdd-import` (it becomes `app/jlr_app/assets/pack.json`).
 
-## Bloqueio conhecido: gravação do CCF (ajuda procurada)
+## Known blocker: CCF writing (help wanted)
 
-Ler e decodificar o CCF (configuração do veículo) do BCM funciona. **Gravar**
-não: o BCM exige que um **Secondary Boot Loader (SBL)** seja baixado para a sua
-RAM antes de aceitar o erase/flash da região de config — sem ele, o erase
-responde `7F 31 22` (conditionsNotCorrect), mesmo com sessão de programação e
-segurança corretas. Esse SBL **não vem no SDD local**: o SDD o busca no servidor
-online da JLR (TOPIx) na hora da gravação. A investigação completa (RE das DLLs,
-testes no carro, dados decifrados) está em
+Reading and decoding the BCM's CCF (vehicle configuration) works. **Writing**
+does not: the BCM requires a **Secondary Boot Loader (SBL)** to be downloaded to
+its RAM before it accepts the erase/flash of the config region — without it, the
+erase replies `7F 31 22` (conditionsNotCorrect), even with the programming
+session and security correct. That SBL **does not ship in a local SDD install**:
+SDD fetches it from JLR's online server (TOPIx) at write time. The full
+investigation (DLL RE, on-car tests, decrypted data) is in
 [`docs/security-ccf-write.md`](docs/security-ccf-write.md).
 
-**Help wanted (EN):** writing the CCF on an L319 (EUCD) BCM needs JLR's Secondary
-Boot Loader (SBL), delivered from JLR online — it is not in a local SDD install.
+**Help wanted:** writing the CCF on an L319 (EUCD) BCM needs JLR's Secondary Boot
+Loader (SBL), delivered from JLR online — it is not in a local SDD install.
 Everything else (reading/decoding the CCF, DTCs, live data, security access)
 works. If you have the **L319 BCM SBL VBF**, or a **J2534 capture of SDD writing
 a CCF**, please open an issue — that single piece is what's needed to finish
 offline CCF writing.
 
-## Princípio sobre dados e direitos
+## Data and rights principle
 
-Este repositório **não contém** dados da Jaguar Land Rover. Os bancos de
-diagnóstico (definições de módulo, DTCs, DIDs, mapa do CCF, textos) pertencem à
-JLR e ficam na instalação do SDD do próprio usuário. A ferramenta `sdd-import`
-lê essa instalação **localmente**, na máquina do dono do veículo, e gera pacotes
-de dados que também não são redistribuídos (ver `.gitignore`).
+This repository **does not contain** Jaguar Land Rover data. The diagnostic
+databases (module definitions, DTCs, DIDs, CCF map, texts) belong to JLR and
+live in the user's own SDD install. The `sdd-import` tool reads that install
+**locally**, on the vehicle owner's machine, and generates data packs that are
+likewise not redistributed (see `.gitignore`).
 
-O código próprio é licenciado sob MIT. O crate `mongoose`, por derivar de
-engenharia reversa publicada sob LGPL-2.1
-(`github.com/dgcarr/Mongoose-USB-2-OBDII-Linux-Driver`), é licenciado sob
-LGPL-2.1. Código sob GPL (por exemplo `5555l/ccf_parser`) é usado apenas como
-**referência de comportamento**, nunca copiado.
+Our own code is MIT-licensed. The `mongoose` crate, deriving from reverse
+engineering published under LGPL-2.1
+(`github.com/dgcarr/Mongoose-USB-2-OBDII-Linux-Driver`), is LGPL-2.1. GPL code
+(e.g. `5555l/ccf_parser`) is used only as a **behavior reference**, never copied.
 
-## Aviso
+## Warning
 
-Mexer em módulos de um veículo tem risco. Toda gravação faz backup antes,
-exige ignição ligada com o motor desligado e confirmação explícita. Use por sua
-conta e risco.
+Touching a vehicle's modules carries risk. Every write backs up first, requires
+ignition on with the engine off, and explicit confirmation. Use at your own risk.
 
-## Ambiente de desenvolvimento
+## Development environment
 
-As toolchains ficam em `C:\dev` (portáteis, sem necessidade de administrador):
-Rust (toolchain GNU + mingw-w64), Flutter, JDK 21, Ghidra. Carregue o ambiente
-com `source env.sh` antes de `cargo`/`flutter`.
+Toolchains live under `C:\dev` (portable, no admin needed): Rust (GNU toolchain +
+mingw-w64), Flutter, JDK, Ghidra; Android SDK/NDK under `C:\dev\android`. Load the
+environment with `source env.sh` before `cargo`/`flutter`.
 
 ```bash
 source env.sh
-cargo test            # testa todos os crates
+cargo test            # tests all crates
 ```

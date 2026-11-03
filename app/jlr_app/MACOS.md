@@ -1,43 +1,43 @@
-# App macOS (nativo, FFI)
+# macOS app (native, FFI)
 
-O alvo macOS está preparado, mas **o build e o teste só rodam num Mac** (não dá
-pra compilar a partir do Windows). O lado Dart já está pronto: `lib/bridge.dart`
-procura a `libjlr_bridge.dylib` dentro do bundle (`Contents/Frameworks/`), e a
-UI/estado são os mesmos das outras plataformas.
+The macOS target is ready, but **building and testing only run on a Mac** (you
+cannot compile it from Windows). The Dart side is already in place:
+`lib/bridge.dart` finds `libjlr_bridge.dylib` inside the bundle
+(`Contents/Frameworks/`), and the UI/state are the same as the other platforms.
 
-## Pré-requisitos no Mac
+## Prerequisites on the Mac
 - **Xcode** + command line tools (`xcode-select --install`).
-- **Flutter** (canal stable) e **Rust** (`rustup`).
-- O **Mongoose Pro JLR** aparece como porta serial `/dev/cu.usbmodem*` (CDC-ACM),
-  sem driver extra — o núcleo Rust fala com ele pela `serialport`.
+- **Flutter** (stable channel) and **Rust** (`rustup`).
+- The **Mongoose Pro JLR** shows up as a serial port `/dev/cu.usbmodem*`
+  (CDC-ACM), no extra driver — the Rust core talks to it via `serialport`.
 
-## Como compilar
-No repositório (que você clona do GitHub), com um pacote do veículo gerado no PC
-do SDD (`packs/L319_201200.sqlite` — veja o README):
+## How to build
+In the repository (which you clone from GitHub), with a vehicle pack generated
+on the SDD machine (`packs/L319_201200.sqlite` — see the README):
 
 ```bash
-bash app/jlr_app/build-macos.sh                 # usa packs/L319_201200.sqlite
-# ou apontando outro pacote:
-bash app/jlr_app/build-macos.sh caminho/para/VEH.sqlite
+bash app/jlr_app/build-macos.sh                 # uses packs/L319_201200.sqlite
+# or pointing at another pack:
+bash app/jlr_app/build-macos.sh path/to/VEH.sqlite
 ```
 
-O script: compila a `libjlr_bridge.dylib` (arquitetura do seu Mac), exporta o
-pacote pro app, roda `flutter build macos --release`, **embute a dylib** em
-`Contents/Frameworks/` e re-assina o app ad-hoc (pro Gatekeeper não barrar).
+The script: builds `libjlr_bridge.dylib` (your Mac's architecture), exports the
+pack to the app, runs `flutter build macos --release`, **embeds the dylib** in
+`Contents/Frameworks/` and re-signs the app ad-hoc (so Gatekeeper lets it run).
 
-Resultado: `app/jlr_app/build/macos/Build/Products/Release/jlr_sdd.app`.
+Result: `app/jlr_app/build/macos/Build/Products/Release/jlr_sdd.app`.
 
-## Rodar
-Abra o `.app`. Em **Conectar**, informe a porta do Mongoose (ex.:
-`/dev/cu.usbmodem1413`). Lê VIN, varre módulos e lê falhas por módulo em segundo
-plano, igual às outras plataformas.
+## Run
+Open the `.app`. In **Connect**, enter the Mongoose port (e.g.
+`/dev/cu.usbmodem1413`). It reads VIN, scans modules and reads faults per module
+in the background, just like the other platforms.
 
-## Notas
-- **Arquitetura:** o script compila a dylib para o host (Apple Silicon → arm64,
-  Intel → x86_64) e casa com o app. Para um `.app` *universal* (distribuir pros
-  dois), seria preciso compilar a dylib nos dois alvos e juntar com `lipo` — fica
-  pra depois.
-- **Permissão de porta serial:** se o macOS pedir, autorize o acesso ao
-  dispositivo USB/serial na primeira conexão.
-- **Assinatura:** o re-sign é ad-hoc (local). Para distribuir fora da sua
-  máquina, seria preciso assinar/notarizar com conta de desenvolvedor Apple.
+## Notes
+- **Architecture:** the script builds the dylib for the host (Apple Silicon →
+  arm64, Intel → x86_64) and matches the app. For a *universal* `.app` (to ship
+  to both), you would build the dylib for both targets and merge them with
+  `lipo` — left for later.
+- **Serial port permission:** if macOS asks, allow access to the USB/serial
+  device on the first connection.
+- **Signing:** the re-sign is ad-hoc (local). To distribute off your machine you
+  would sign/notarize with an Apple developer account.
