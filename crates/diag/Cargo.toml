@@ -7,4 +7,7 @@ description = "Leitura de diagnóstico do veículo (VIN, módulos, DTCs, DIDs) s
 
 [dependencies]
 mongoose = { path = "../mongoose" }
-serialport = "4.7.0"
+# default-features=false descarta o libudev (enumeração de portas), que não
+# compila no Android e que não usamos — abrimos a porta pelo nome, não por
+# enumeração. Mantém a abertura/IO em Windows/macOS/Linux.
+serialport = { version = "4.7.0", default-features = false }
