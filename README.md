@@ -9,6 +9,12 @@ Primeiro alvo validado: **Land Rover Discovery 4 (L319) 3.0 SDV6 diesel**.
 A arquitetura é genérica para toda a cobertura do SDD; outros veículos entram à
 medida que são validados.
 
+> **Beta 0.1** — as quatro plataformas (Windows, macOS, Android, web) compilam;
+> leitura e diagnóstico foram validados no carro real. Binários em
+> **[Releases](../../releases)**. A conexão no **Android é experimental**
+> (USB-OTG, ainda sem validação em dispositivo) e a **gravação do CCF** depende
+> de um binário proprietário da JLR — detalhes abaixo.
+
 ## Estado atual
 
 Leitura e diagnóstico **funcionam no carro real** (validado num L319 MY12). A
@@ -23,10 +29,27 @@ ver "Bloqueio conhecido" abaixo.
 | `diag` | UDS/ISO-TP: VIN, scan de módulos, DTCs c/ help, live data | ✅ no carro |
 | `ccf` (leitura) | ler + decodificar o CCF do BCM | ✅ no carro |
 | `ccf` (gravação) | editar e gravar o CCF | ⛔ bloqueado (SBL) |
-| app Flutter | UI multiplataforma + ponte FFI/HTTP | 🚧 web ok; Windows nativo / Android / macOS em andamento |
+| app Flutter | UI (Windows/macOS/Android/web) + ponte FFI/HTTP | ✅ compila nas 4; Windows/macOS/web conectam; Android USB-OTG **experimental** |
 | `j2534-shim` | capturar o SDD gravando (destrava o CCF) | 🚧 planejado |
 | `procedures` | rotinas de serviço (DPF, injetores, suspensão…) | ⬜ |
 | expansão | todos os veículos cobertos pelo SDD | ⬜ |
+
+## Builds e instalação (beta 0.1)
+
+Binários da beta em **[Releases](../../releases)**. Para compilar do código
+(carregue o ambiente com `source env.sh` antes):
+
+- **Windows (nativo):** `bash app/jlr_app/build-windows.sh` → `jlr_sdd.exe`
+  (FFI direto com o Mongoose; requer VS Build Tools com o workload C++).
+- **Android (APK):** `bash app/jlr_app/build-android.sh` → `app-release.apk`
+  (requer Android SDK/NDK + `cargo-ndk`; conexão USB-OTG experimental —
+  ver [`app/jlr_app/ANDROID.md`](app/jlr_app/ANDROID.md)).
+- **macOS:** `bash app/jlr_app/build-macos.sh` num Mac
+  (ver [`app/jlr_app/MACOS.md`](app/jlr_app/MACOS.md)).
+- **Web + servidor local:** `run-app.bat` (sobe `car-scan serve` e abre o navegador).
+
+O app **não embute dados da JLR**: gere o pacote do seu veículo a partir do
+próprio SDD com `sdd-import` (vira `app/jlr_app/assets/pack.json`).
 
 ## Bloqueio conhecido: gravação do CCF (ajuda procurada)
 
