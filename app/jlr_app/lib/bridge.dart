@@ -52,7 +52,7 @@ class JlrBridge {
         lastErr = e;
       }
     }
-    throw Exception('ponte nativa não encontrada (jlr_bridge): $lastErr');
+    throw Exception('native bridge not found (jlr_bridge): $lastErr');
   }
 
   /// Candidatos de caminho da lib, por plataforma. No Android a .so vem do APK

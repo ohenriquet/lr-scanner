@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'l10n.dart';
 
 /// Na web, a ligação com o carro passa por um servidor local (car-scan serve),
 /// que lê o Mongoose e expõe a leitura por HTTP na mesma origem. Sem servidor,
@@ -17,12 +18,11 @@ class CarLink {
       if (r.statusCode == 200) {
         return jsonDecode(r.body) as Map<String, dynamic>;
       }
-      return {'ok': false, 'error': 'servidor respondeu ${r.statusCode}'};
+      return {'ok': false, 'error': 'server responded ${r.statusCode}'};
     } catch (e) {
       return {
         'ok': false,
-        'error': 'Sem servidor local. Rode: car-scan --port COM5 serve '
-            '--web app/jlr_app/build/web',
+        'error': L.t('No local server. Run: car-scan --port COM5 serve --web app/jlr_app/build/web'),
       };
     }
   }

@@ -4,8 +4,15 @@ import 'car_state.dart';
 import 'pack.dart';
 import 'screens.dart';
 import 'theme.dart';
+import 'l10n.dart';
 
 void main() => runApp(const JlrApp());
+
+String _langName(AppLang l) => switch (l) {
+      AppLang.en => 'English',
+      AppLang.es => 'Español',
+      AppLang.pt => 'Português',
+    };
 
 class JlrApp extends StatefulWidget {
   const JlrApp({super.key});
@@ -16,6 +23,8 @@ class JlrApp extends StatefulWidget {
 class _JlrAppState extends State<JlrApp> with WidgetsBindingObserver {
   // null = segue o tema do sistema; senão, override do usuário pelo toggle.
   Brightness? _override;
+  // null = segue o idioma do sistema; senão, escolha do usuário no seletor.
+  AppLang? _langOverride;
 
   @override
   void initState() {
@@ -34,6 +43,11 @@ class _JlrAppState extends State<JlrApp> with WidgetsBindingObserver {
     if (_override == null) setState(() {}); // segue o SO ao vivo
   }
 
+  @override
+  void didChangeLocales(List<Locale>? locales) {
+    if (_langOverride == null) setState(() {}); // segue o idioma do SO ao vivo
+  }
+
   Brightness get _effective =>
       _override ??
       WidgetsBinding.instance.platformDispatcher.platformBrightness;
@@ -41,10 +55,23 @@ class _JlrAppState extends State<JlrApp> with WidgetsBindingObserver {
   void _toggleTheme() => setState(() =>
       _override = _effective == Brightness.dark ? Brightness.light : Brightness.dark);
 
+  AppLang get _effectiveLang {
+    if (_langOverride != null) return _langOverride!;
+    return switch (
+        WidgetsBinding.instance.platformDispatcher.locale.languageCode) {
+      'es' => AppLang.es,
+      'pt' => AppLang.pt,
+      _ => AppLang.en,
+    };
+  }
+
+  void _setLang(AppLang l) => setState(() => _langOverride = l);
+
   @override
   Widget build(BuildContext context) {
     final b = _effective;
     C.brightness = b; // a paleta global (C.*) segue o tema ativo
+    L.lang = _effectiveLang; // o idioma global (L.*) segue a escolha/sistema
     final scheme = ColorScheme.fromSeed(seedColor: C.accent, brightness: b).copyWith(
       surface: C.panel,
       surfaceContainerHighest: C.panel2,
@@ -72,7 +99,12 @@ class _JlrAppState extends State<JlrApp> with WidgetsBindingObserver {
                 : Typography.blackMountainView)
             .apply(bodyColor: C.ink, displayColor: C.ink),
       ),
-      home: HomeShell(brightness: b, onToggleTheme: _toggleTheme),
+      home: HomeShell(
+        brightness: b,
+        onToggleTheme: _toggleTheme,
+        lang: _effectiveLang,
+        onSetLang: _setLang,
+      ),
     );
   }
 }
@@ -82,9 +114,13 @@ class HomeShell extends StatefulWidget {
     super.key,
     required this.brightness,
     required this.onToggleTheme,
+    required this.lang,
+    required this.onSetLang,
   });
   final Brightness brightness;
   final VoidCallback onToggleTheme;
+  final AppLang lang;
+  final void Function(AppLang) onSetLang;
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
@@ -111,9 +147,9 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   static const _dests = [
-    (Icons.dashboard_outlined, Icons.dashboard, 'Painel'),
-    (Icons.show_chart_outlined, Icons.show_chart, 'Ao vivo'),
-    (Icons.error_outline, Icons.error, 'Falhas'),
+    (Icons.dashboard_outlined, Icons.dashboard, 'Panel'),
+    (Icons.show_chart_outlined, Icons.show_chart, 'Live'),
+    (Icons.error_outline, Icons.error, 'Faults'),
     (Icons.tune_outlined, Icons.tune, 'Config'),
   ];
 
@@ -127,7 +163,7 @@ class _HomeShellState extends State<HomeShell> {
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text('Erro ao carregar o pacote:\n${snap.error}',
+                child: Text('${L.t('Error loading the pack:')}\n${snap.error}',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: C.crit)),
               ),
@@ -185,7 +221,7 @@ class _HomeShellState extends State<HomeShell> {
                     NavigationRailDestination(
                       icon: Icon(d.$1),
                       selectedIcon: Icon(d.$2, color: C.accent),
-                      label: Text(d.$3),
+                      label: Text(L.t(d.$3)),
                     ),
                 ],
               ),
@@ -209,10 +245,32 @@ class _HomeShellState extends State<HomeShell> {
               ],
             ),
             actions: [
+              PopupMenuButton<AppLang>(
+                tooltip: 'Language',
+                icon: Icon(Icons.translate, color: C.ink2, size: 20),
+                onSelected: widget.onSetLang,
+                itemBuilder: (_) => [
+                  for (final l in AppLang.values)
+                    PopupMenuItem(
+                      value: l,
+                      child: Row(children: [
+                        Icon(
+                          widget.lang == l
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked,
+                          size: 16,
+                          color: widget.lang == l ? C.accent : C.ink3,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(_langName(l)),
+                      ]),
+                    ),
+                ],
+              ),
               IconButton(
                 tooltip: widget.brightness == Brightness.dark
-                    ? 'Tema claro'
-                    : 'Tema escuro',
+                    ? L.t('Light theme')
+                    : L.t('Dark theme'),
                 onPressed: widget.onToggleTheme,
                 icon: Icon(
                   widget.brightness == Brightness.dark
@@ -241,7 +299,7 @@ class _HomeShellState extends State<HomeShell> {
                       return OutlinedButton.icon(
                         onPressed: () => car.disconnect(),
                         icon: const Icon(Icons.link_off, size: 16),
-                        label: const Text('Desconectar'),
+                        label: Text(L.t('Disconnect')),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: C.good,
                           side: BorderSide(color: C.line),
@@ -251,7 +309,7 @@ class _HomeShellState extends State<HomeShell> {
                     return OutlinedButton.icon(
                       onPressed: () => _openConnect(context, car),
                       icon: const Icon(Icons.usb, size: 16),
-                      label: const Text('Conectar'),
+                      label: Text(L.t('Connect')),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: C.ink2,
                         side: BorderSide(color: C.line),
@@ -279,7 +337,7 @@ class _HomeShellState extends State<HomeShell> {
                       NavigationDestination(
                         icon: Icon(d.$1),
                         selectedIcon: Icon(d.$2, color: C.accent),
-                        label: d.$3,
+                        label: L.t(d.$3),
                       ),
                   ],
                 ),
@@ -300,19 +358,15 @@ class _HomeShellState extends State<HomeShell> {
         context: context,
         builder: (_) => AlertDialog(
           backgroundColor: C.panel,
-          title: const Text('Conexão com o carro'),
+          title: Text(L.t('Car connection')),
           content: Text(
-            'Esta é a versão web (sem acesso a hardware). A leitura do carro '
-            '(VIN, falhas ativas, valores de sensor) exige o app nativo '
-            '(Windows/macOS/Android), que fala com o Mongoose pela ponte FFI.\n\n'
-            'Aqui você vê os dados do pacote: módulos, catálogo de live data e a '
-            'referência de falhas com o help do SDD por módulo.',
+            L.t('This is the web version (no hardware access). Reading the car (VIN, active faults, sensor values) needs the native app (Windows/macOS/Android), which talks to the Mongoose over the FFI bridge. Here you can see the pack data: modules, live-data catalog and the fault reference with the SDD help per module.'),
             style: TextStyle(color: C.ink2),
           ),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Entendi')),
+                child: Text(L.t('Got it'))),
           ],
         ),
       );
@@ -324,14 +378,14 @@ class _HomeShellState extends State<HomeShell> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: C.panel,
-        title: const Text('Conectar ao Mongoose'),
+        title: Text(L.t('Connect to the Mongoose')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: portCtrl,
-              decoration: const InputDecoration(
-                  labelText: 'Porta (ex.: COM5, /dev/ttyACM0)'),
+              decoration: InputDecoration(
+                  labelText: L.t('Port (e.g. COM5, /dev/ttyACM0)')),
             ),
             const SizedBox(height: 8),
             TextField(
@@ -341,8 +395,7 @@ class _HomeShellState extends State<HomeShell> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Lê VIN, varre os módulos e lê as falhas ativas. Ignição ligada, '
-              'motor desligado. Nada é gravado.',
+              L.t('Reads VIN, scans the modules and reads active faults. Ignition on, engine off. Nothing is written.'),
               style: TextStyle(fontSize: 11.5, color: C.ink3),
             ),
           ],
@@ -350,7 +403,7 @@ class _HomeShellState extends State<HomeShell> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar')),
+              child: Text(L.t('Cancel'))),
           FilledButton(
             onPressed: () {
               final port = portCtrl.text.trim();
@@ -358,7 +411,7 @@ class _HomeShellState extends State<HomeShell> {
               Navigator.pop(context);
               car.connect(port, baud);
             },
-            child: const Text('Conectar'),
+            child: Text(L.t('Connect')),
           ),
         ],
       ),

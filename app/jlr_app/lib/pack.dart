@@ -1,3 +1,4 @@
+import 'l10n.dart';
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -258,9 +259,9 @@ class DtcHelp {
 
   /// Seções não vazias como (título, itens).
   List<MapEntry<String, List<String>>> get sections => [
-        MapEntry('Descrição complementar', suppDesc),
-        MapEntry('Sintomas', symptoms),
-        MapEntry('Causas prováveis', causes),
-        MapEntry('Ações recomendadas', actions),
+        MapEntry(L.t('Additional description'), suppDesc),
+        MapEntry(L.t('Symptoms'), symptoms),
+        MapEntry(L.t('Probable causes'), causes),
+        MapEntry(L.t('Recommended actions'), actions),
       ].where((e) => e.value.isNotEmpty).toList();
 }

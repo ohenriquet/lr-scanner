@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/services.dart';
+import 'l10n.dart';
 import 'bridge.dart';
 
 /// Ligação com o carro via ponte nativa (FFI). Cada operação roda num
@@ -32,7 +33,7 @@ class CarLink {
       if (fd == null || fd < 0) {
         return {
           'ok': false,
-          'error': 'Mongoose não encontrado ou permissão USB negada'
+          'error': L.t('Mongoose not found or USB permission denied')
         };
       }
       final theFd = fd;

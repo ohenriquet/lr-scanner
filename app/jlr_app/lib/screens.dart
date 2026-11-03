@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'car_state.dart';
 import 'pack.dart';
 import 'theme.dart';
+import 'l10n.dart';
 
 /// Limita a largura do conteúdo em telas largas.
 class _Content extends StatelessWidget {
@@ -61,7 +62,7 @@ class PainelScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _sectionTitle('VEÍCULO'),
+                  _sectionTitle(L.t('VEHICLE')),
                   Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
@@ -78,18 +79,18 @@ class PainelScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
                   Wrap(spacing: 24, runSpacing: 10, children: [
-                    _kv('Modelo', 'Discovery 4'),
-                    _kv('Plataforma', v['model']?.toString() ?? '—'),
-                    _kv('Ano', '${v['year_code']} · ${v['model_year']}'),
-                    _kv('Motor', '3.0 SDV6 diesel'),
+                    _kv(L.t('Model'), 'Discovery 4'),
+                    _kv(L.t('Platform'), v['model']?.toString() ?? '—'),
+                    _kv(L.t('Year'), '${v['year_code']} · ${v['model_year']}'),
+                    _kv(L.t('Engine'), '3.0 SDV6 diesel'),
                   ]),
                   const SizedBox(height: 14),
                   Wrap(spacing: 8, runSpacing: 8, children: [
                     _chip('HS-CAN 500k'),
                     _chip('MS-CAN 125k'),
                     _chip(car.connected
-                        ? '${car.online.length}/${pack.modules.length} online'
-                        : '${pack.modules.length} módulos'),
+                        ? '${car.online.length}/${pack.modules.length} ${L.t('online')}'
+                        : '${pack.modules.length} ${L.t('modules')}'),
                     _chip('Mongoose Pro JLR'),
                   ]),
                   const SizedBox(height: 12),
@@ -104,12 +105,11 @@ class PainelScreen extends StatelessWidget {
                       ),
                     ])
                   else if (car.connectError != null)
-                    Text('Falha ao conectar: ${car.connectError}',
+                    Text('${L.t('Connection failed')}: ${car.connectError}',
                         style: TextStyle(fontSize: 11.5, color: C.crit))
                   else
                     Text(
-                      'VIN, falhas ativas e valores de sensor são leituras do '
-                      'carro — toque em Conectar.',
+                      L.t('VIN, active faults and sensor values are read from the car — tap Connect.'),
                       style: TextStyle(fontSize: 11.5, color: C.ink3),
                     ),
                 ],
@@ -117,7 +117,7 @@ class PainelScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          _sectionTitle('MÓDULOS (${pack.modules.length})'),
+          _sectionTitle('${L.t('MODULES')} (${pack.modules.length})'),
           LayoutBuilder(builder: (context, c) {
             final cols = c.maxWidth > 680 ? 3 : (c.maxWidth > 440 ? 2 : 1);
             return GridView.count(
@@ -228,10 +228,8 @@ class _LiveScreenState extends State<LiveScreen> {
               children: [
                 Text(
                   widget.car.connected
-                      ? 'Toque num sinal para observar (leitura ao vivo a ~2 Hz). '
-                          '${_total()} sinais no catálogo.'
-                      : 'Catálogo de live data — ${_total()} sinais em '
-                          '${mods.length} módulos. Valores ao vivo exigem o carro.',
+                      ? L.liveHintConnected(_total())
+                      : L.liveHintOffline(_total(), mods.length),
                   style: TextStyle(fontSize: 11.5, color: C.ink3),
                 ),
                 const SizedBox(height: 10),
@@ -266,7 +264,7 @@ class _LiveScreenState extends State<LiveScreen> {
                       style: const TextStyle(fontSize: 14),
                       decoration: InputDecoration(
                         isDense: true,
-                        hintText: 'Filtrar sinais…',
+                        hintText: L.t('Filter signals…'),
                         hintStyle: TextStyle(color: C.ink3),
                         filled: true,
                         fillColor: C.panel2,
@@ -390,10 +388,8 @@ class _FalhasScreenState extends State<FalhasScreen> {
               children: [
                 Text(
                   car.connected
-                      ? 'Falhas ativas lidas do carro. Busque um código para a '
-                          'referência completa.'
-                      : 'Referência de falhas: busque um código para a descrição '
-                          'e o help do SDD por módulo. As ativas vêm do carro.',
+                      ? L.t('Active faults read from the car. Search a code for the full reference.')
+                      : L.t('Fault reference: search a code for the description and the SDD help per module. Active ones come from the car.'),
                   style: TextStyle(fontSize: 11.5, color: C.ink3),
                 ),
                 const SizedBox(height: 10),
@@ -404,7 +400,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
                   textCapitalization: TextCapitalization.characters,
                   decoration: InputDecoration(
                     isDense: true,
-                    hintText: 'Código do DTC (ex.: C1A13, P0671)…',
+                    hintText: L.t('DTC code (e.g. C1A13, P0671)…'),
                     hintStyle: TextStyle(color: C.ink3),
                     filled: true,
                     fillColor: C.panel2,
@@ -462,10 +458,10 @@ class _FalhasScreenState extends State<FalhasScreen> {
               Expanded(
                 child: Text(
                   car.dtcsScanning
-                      ? 'Lendo falhas… ${car.dtcScanDone}/${car.dtcScanTotal} módulos'
+                      ? L.readingFaultsProgress(car.dtcScanDone, car.dtcScanTotal)
                       : entries.isEmpty
-                          ? 'Nenhuma falha na memória'
-                          : '$nConf confirmada${nConf == 1 ? '' : 's'} · ${entries.length} na memória',
+                          ? L.t('No faults in memory')
+                          : L.confirmedSummary(nConf, entries.length),
                   style: const TextStyle(
                       fontWeight: FontWeight.w700, fontSize: 13),
                 ),
@@ -484,7 +480,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
                     ? null
                     : () => car.refresh(),
                 icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Reler'),
+                label: Text(L.t('Reread')),
               ),
             ]),
           ),
@@ -494,8 +490,8 @@ class _FalhasScreenState extends State<FalhasScreen> {
               child: Center(
                   child: Text(
                       car.dtcsScanning
-                          ? 'Lendo falhas…'
-                          : 'Nenhuma falha na memória.',
+                          ? L.t('Reading faults…')
+                          : L.t('No faults in memory.'),
                       style: TextStyle(color: C.ink3))),
             ),
           for (final e in entries) _activeTile(e.$1, e.$2, e.$3),
@@ -503,7 +499,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
       );
     }
     return Center(
-        child: Text('Digite um código para buscar',
+        child: Text(L.t('Type a code to search'),
             style: TextStyle(color: C.ink3)));
   }
 
@@ -536,7 +532,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
             padding: const EdgeInsets.only(top: 4),
             child: Wrap(spacing: 6, children: [
               _chip(module),
-              _chip(confirmed ? 'confirmada' : 'histórico'),
+              _chip(confirmed ? L.t('confirmed') : L.t('history')),
               _chip('status 0x${status.toRadixString(16).padLeft(2, '0')}'),
             ]),
           ),
@@ -545,7 +541,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
               ? [
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: Text('Sem help para $base no módulo $module.',
+                    child: Text(L.noHelpFor(base, module),
                         style: TextStyle(
                             fontSize: 12,
                             color: C.ink3,
@@ -597,7 +593,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Sem help de diagnóstico para este código neste pacote.',
+                      L.t('No diagnostic help for this code in this pack.'),
                       style: TextStyle(
                           fontSize: 12, color: C.ink3, fontStyle: FontStyle.italic),
                     ),
@@ -614,7 +610,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 6, bottom: 2),
-            child: Text('módulo $module',
+            child: Text(L.moduleLabel(module),
                 style: C.mono.copyWith(
                     fontSize: 11, color: C.accent, fontWeight: FontWeight.w700)),
           ),
@@ -702,10 +698,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
               children: [
                 Text(
                   car.ccfImage != null
-                      ? 'Configuração (CCF) lida do BCM. Visualização; a gravação '
-                          'no BCM depende de um mecanismo ainda não liberado.'
-                      : 'Configuração (CCF) do veículo. Conecte para ler os valores '
-                          'atuais. A gravação ainda não está disponível.',
+                      ? L.t('Vehicle configuration (CCF) read from the BCM. View only; writing to the BCM depends on a mechanism not yet unlocked.')
+                      : L.t('Vehicle configuration (CCF). Connect to read the current values. Writing is not available yet.'),
                   style: TextStyle(fontSize: 11.5, color: C.ink3),
                 ),
                 const SizedBox(height: 10),
@@ -717,7 +711,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                       style: const TextStyle(fontSize: 14),
                       decoration: InputDecoration(
                         isDense: true,
-                        hintText: 'Filtrar opções (ex.: luz, alarme)…',
+                        hintText: L.t('Filter options (e.g. light, alarm)…'),
                         hintStyle: TextStyle(color: C.ink3),
                         filled: true,
                         fillColor: C.panel2,
@@ -735,9 +729,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
                   ),
                   const SizedBox(width: 8),
                   Tooltip(
-                    message: 'Mostrar opções avançadas (ocultas no SDD)',
+                    message: L.t('Show advanced options (hidden in SDD)'),
                     child: Row(children: [
-                      Text('Avançadas',
+                      Text(L.t('Advanced'),
                           style: TextStyle(fontSize: 12, color: C.ink2)),
                       Switch(
                         value: _advanced,
@@ -778,7 +772,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                   Padding(
                     padding: const EdgeInsets.only(top: 24),
                     child: Center(
-                        child: Text('Nada encontrado.',
+                        child: Text(L.t('Nothing found.'),
                             style: TextStyle(color: C.ink3))),
                   ),
               ],
@@ -831,8 +825,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              'bloco ${p.block} · byte ${p.byteStart} · máscara 0x${p.mask.toRadixString(16)}'
-              '${p.editable ? "" : " · não editável no SDD"}',
+              L.ccfMeta(p.block, p.byteStart, p.mask.toRadixString(16), p.editable),
               style: TextStyle(fontSize: 10.5, color: C.ink3),
             ),
           ),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'car_link.dart';
 import 'pack.dart';
+import 'l10n.dart';
 
 /// Estado da ligação com o carro e das leituras ao vivo. Partilhado pelas telas.
 class CarState extends ChangeNotifier {
@@ -46,7 +47,7 @@ class CarState extends ChangeNotifier {
 
   Future<void> connect(String port, int baud) async {
     if (!supported) {
-      connectError = 'Disponível apenas no app nativo.';
+      connectError = L.t('Available only in the native app.');
       notifyListeners();
       return;
     }
@@ -59,7 +60,7 @@ class CarState extends ChangeNotifier {
         connected = true;
         await refresh();
       } else {
-        connectError = r['error']?.toString() ?? 'falha ao conectar';
+        connectError = r['error']?.toString() ?? L.t('connection failed');
       }
     } catch (e) {
       connectError = '$e';
