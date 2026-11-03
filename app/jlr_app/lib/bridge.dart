@@ -8,6 +8,8 @@ typedef _StrFnC = Pointer<Utf8> Function();
 typedef _StrFnD = Pointer<Utf8> Function();
 typedef _ConnectC = Pointer<Utf8> Function(Pointer<Utf8>, Int32);
 typedef _ConnectD = Pointer<Utf8> Function(Pointer<Utf8>, int);
+typedef _ConnectFdC = Pointer<Utf8> Function(Int32, Int32);
+typedef _ConnectFdD = Pointer<Utf8> Function(int, int);
 typedef _StrArgC = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _StrArgD = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _DidC = Pointer<Utf8> Function(Int32, Int32, Int32);
@@ -26,6 +28,9 @@ class JlrBridge {
 
   late final _version = _lib.lookupFunction<_StrFnC, _StrFnD>('jlr_version');
   late final _connect = _lib.lookupFunction<_ConnectC, _ConnectD>('jlr_connect');
+  // Só existe na .so do Android (cfg target_os="android"); lookup preguiçoso.
+  late final _connectFd =
+      _lib.lookupFunction<_ConnectFdC, _ConnectFdD>('jlr_connect_fd');
   late final _disconnect = _lib.lookupFunction<_VoidC, _VoidD>('jlr_disconnect');
   late final _vin = _lib.lookupFunction<_StrFnC, _StrFnD>('jlr_vin');
   late final _scan = _lib.lookupFunction<_StrArgC, _StrArgD>('jlr_scan');
@@ -89,6 +94,10 @@ class JlrBridge {
       calloc.free(cp);
     }
   }
+
+  /// Conecta pelo fd do UsbManager (Android USB-OTG). EXPERIMENTAL.
+  Map<String, dynamic> connectFd(int fd, {int baud = 500000}) =>
+      _call(_connectFd(fd, baud));
 
   void disconnect() => _disconnect();
 

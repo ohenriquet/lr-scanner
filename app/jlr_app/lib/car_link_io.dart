@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:isolate';
+import 'package:flutter/services.dart';
 import 'bridge.dart';
 
 /// Ligação com o carro via ponte nativa (FFI). Cada operação roda num
@@ -10,8 +12,32 @@ class CarLink {
   final String? path;
   CarLink([this.path]);
 
-  Future<Map<String, dynamic>> connect(String port, {int baud = 500000}) {
+  // Canal com o lado Android (Kotlin) para abrir o Mongoose via USB-OTG e
+  // devolver o file descriptor do UsbManager.
+  static const _usb = MethodChannel('jlr/usb');
+
+  Future<Map<String, dynamic>> connect(String port, {int baud = 500000}) async {
     final p = path;
+    if (Platform.isAndroid) {
+      // No Android não há porta serial: pede o fd do Mongoose ao UsbManager
+      // (com permissão) e conecta por ele. EXPERIMENTAL.
+      int? fd;
+      try {
+        fd = await _usb
+            .invokeMethod<int>('openMongoose')
+            .timeout(const Duration(seconds: 40), onTimeout: () => -5);
+      } catch (e) {
+        return {'ok': false, 'error': 'USB: $e'};
+      }
+      if (fd == null || fd < 0) {
+        return {
+          'ok': false,
+          'error': 'Mongoose não encontrado ou permissão USB negada'
+        };
+      }
+      final theFd = fd;
+      return Isolate.run(() => JlrBridge.open(p).connectFd(theFd, baud: baud));
+    }
     return Isolate.run(() => JlrBridge.open(p).connect(port, baud: baud));
   }
 

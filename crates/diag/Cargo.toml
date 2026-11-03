@@ -11,3 +11,10 @@ mongoose = { path = "../mongoose" }
 # compila no Android e que não usamos — abrimos a porta pelo nome, não por
 # enumeração. Mantém a abertura/IO em Windows/macOS/Linux.
 serialport = { version = "4.7.0", default-features = false }
+
+# Android: transporte USB-OTG (Mongoose via fd do UsbManager). nusb suporta
+# from_fd; futures-lite dá o block_on para as transferências.
+[target.'cfg(target_os = "android")'.dependencies]
+nusb = "0.1"
+futures-lite = "2"
+

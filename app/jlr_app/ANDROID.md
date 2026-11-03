@@ -1,56 +1,48 @@
-# Android (USB-OTG) — estado e plano
+# Android (USB-OTG)
 
-O app já roda a camada de dados no Android (pacote + UI). Falta a leitura do
-carro por **USB-OTG**. Diferente do desktop (porta COM serial), no Android o
-acesso ao USB passa pelo **USB Host API**: o app pede permissão, abre o
-dispositivo e recebe um **file descriptor (fd)**; o Rust fala os endpoints bulk
-por esse fd.
+O app Android está **completo e compila** (UI + núcleo Rust via `.so`). A
+**conexão com o carro por USB-OTG está implementada, porém EXPERIMENTAL** —
+ainda não validada num dispositivo real.
 
-## Feito
-- Alvo `android/` scaffoldado.
-- `AndroidManifest.xml`: `uses-feature android.hardware.usb.host`, intent-filter
-  `USB_DEVICE_ATTACHED` e `res/xml/device_filter.xml` com o Mongoose
-  (VID 0x18E1 / PID 0x0104) — o app é oferecido ao plugar o adaptador.
+No desktop o Mongoose é uma porta COM serial; no Android o acesso ao USB passa
+pelo **USB Host API**: o app pede permissão, abre o dispositivo e recebe um
+**file descriptor (fd)**; o núcleo Rust fala os endpoints bulk CDC-ACM por esse
+fd (via `nusb::Device::from_fd`).
 
-## Falta
+## Como está montado (ponta a ponta)
+1. **Rust** (`crates/diag/src/usb_fd.rs`): `UsbFdTransport` implementa
+   `mongoose::Transport` sobre o fd — duplica o fd, abre com `nusb`, manda
+   `SET_LINE_CODING` + `SET_CONTROL_LINE_STATE` (DTR/RTS) e usa um *reader* de
+   fundo lendo o bulk IN para um buffer. `CarSession::open_usb_fd(fd, baud)`.
+2. **Ponte** (`crates/bridge`): `jlr_connect_fd(fd, baud)` monta a sessão USB
+   (a sessão vira um enum serial|usb). Só existe na `.so` do Android.
+3. **Kotlin** (`MainActivity.kt`): `MethodChannel("jlr/usb")` → `openMongoose`
+   acha o Mongoose (VID 0x18E1/PID 0x0104), pede permissão (`requestPermission`
+   + BroadcastReceiver), abre (`openDevice`) e devolve `getFileDescriptor()`.
+4. **Dart** (`car_link_io.dart`): no Android, `connect()` pega o fd pelo canal e
+   chama `JlrBridge.connectFd(fd)` (FFI) em vez do caminho serial.
+5. **Manifest**: `uses-feature android.hardware.usb.host`, intent-filter
+   `USB_DEVICE_ATTACHED` + `res/xml/device_filter.xml` (o app é oferecido ao
+   plugar o adaptador).
 
-### 1. Compilar a ponte para Android (.so por ABI)
-A `jlr_bridge` precisa virar `libjlr_bridge.so` para cada ABI, em
-`android/app/src/main/jniLibs/<abi>/`. Com o Android NDK instalado:
+## Build
 ```sh
-cargo install cargo-ndk
-rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
-  -o app/src/main/jniLibs build --release -p jlr-bridge
+bash app/jlr_app/build-android.sh      # .so (3 ABIs) + pack + flutter build apk
+# APK: app/jlr_app/build/app/outputs/flutter-apk/app-release.apk
 ```
-(ver `build-android.sh`).
+Pré-requisitos: Android SDK + NDK, `cargo-ndk`, targets Rust de Android, Flutter
+(ver `env.sh`; o setup fica em `C:\dev\android`).
 
-### 2. Transporte USB (em vez do serial)
-O `SerialTransport` (crate `diag`) é desktop. Para Android, um `UsbTransport`
-que implemente o mesmo trait `mongoose::Transport` sobre o **fd**:
-- o adaptador é CDC-ACM; falar os endpoints bulk (OUT 0x01 / IN 0x82) por
-  `nusb::Device::from_fd(fd)` (a crate `nusb` aceita um fd já aberto), ou via
-  `ioctl` do `usbfs`;
-- enviar `SET_CONTROL_LINE_STATE` (DTR/RTS), como faz o driver cdc_acm, antes
-  de transmitir.
-O `jlr_bridge` ganha uma entrada `jlr_connect_fd(fd, baud)` que monta a sessão
-com esse transporte (o `jlr_connect` atual, por porta, continua no desktop).
+## Testar no carro
+Aparelho com USB Host + cabo OTG + Mongoose + carro (ignição ligada). Instale o
+APK (`adb install -r ...`), plugue o Mongoose (o app abre), toque **Conectar**:
+o Android pede permissão USB e o app conecta pelo fd.
 
-### 3. Permissão + fd no lado Dart/Android
-Um plugin (ou `MethodChannel`) que:
-- lista dispositivos (`UsbManager.getDeviceList`), acha o Mongoose;
-- pede permissão (`requestPermission`), abre (`openDevice`) e obtém o fd
-  (`UsbDeviceConnection.getFileDescriptor`);
-- passa o fd para o Rust via `jlr_connect_fd`.
-Em Flutter dá para usar um pacote USB (ex.: `usb_serial`/`quick_usb`) só para a
-permissão/enumeração e então repassar o fd.
-
-### 4. CarLink no Android
-`car_link_io.dart` hoje chama `connect(port)`. No Android, o fluxo é
-`listar → permissão → fd → connect_fd(fd)`. O `CarLink` ganha um caminho
-Android (mesma API assíncrona), mantendo a UI igual.
-
-## Testar
-Precisa de um aparelho Android com USB Host (a maioria dos tablets/telefones
-recentes), um cabo OTG e o Mongoose + carro. `flutter build apk --release` e
-instalar; ao plugar o Mongoose, o app abre e o botão Conectar faz o fluxo USB.
+## Incertezas a validar no dispositivo (ajustar se falhar)
+- **Interface/endpoints** em `usb_fd.rs`: assumi o layout padrão CDC-ACM
+  (comm=0, data=1, bulk OUT 0x01 / IN 0x82). Se a conexão falhar, confira os
+  descritores reais do Mongoose e ajuste as constantes.
+- **Ciclo de vida do fd**: o Rust duplica o fd (dono de uma cópia) e o Kotlin
+  mantém a `UsbDeviceConnection` viva (dono do original). Conferir que não há
+  double-close nem fd fechado cedo.
+- **nusb/`from_fd` no Android**: compila; falta exercitar em runtime.

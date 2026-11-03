@@ -19,10 +19,52 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Mutex, OnceLock};
 
-use diag::{CarSession, ModuleAddr, SerialTransport};
+use diag::{CarSession, ModuleAddr, ModuleDtcs, SerialTransport};
+#[cfg(target_os = "android")]
+use diag::UsbFdTransport;
 use serde_json::{json, Value};
 
-type Session = CarSession<SerialTransport>;
+/// Sessão ativa: serial (desktop) ou USB-OTG por fd (Android). Os métodos de
+/// diagnóstico são genéricos em `CarSession<T>`; aqui só despachamos para o
+/// transporte certo.
+enum AnySession {
+    Serial(CarSession<SerialTransport>),
+    #[cfg(target_os = "android")]
+    Usb(CarSession<UsbFdTransport>),
+}
+
+impl AnySession {
+    fn read_vin(&mut self) -> Option<String> {
+        match self {
+            Self::Serial(s) => s.read_vin(),
+            #[cfg(target_os = "android")]
+            Self::Usb(s) => s.read_vin(),
+        }
+    }
+    fn scan(&mut self, m: &[ModuleAddr]) -> Vec<ModuleAddr> {
+        match self {
+            Self::Serial(s) => s.scan(m),
+            #[cfg(target_os = "android")]
+            Self::Usb(s) => s.scan(m),
+        }
+    }
+    fn read_dtcs(&mut self, m: &[ModuleAddr]) -> Vec<ModuleDtcs> {
+        match self {
+            Self::Serial(s) => s.read_dtcs(m),
+            #[cfg(target_os = "android")]
+            Self::Usb(s) => s.read_dtcs(m),
+        }
+    }
+    fn read_did_raw(&mut self, req: u16, resp: u16, did: u16) -> Option<Vec<u8>> {
+        match self {
+            Self::Serial(s) => s.read_did_raw(req, resp, did),
+            #[cfg(target_os = "android")]
+            Self::Usb(s) => s.read_did_raw(req, resp, did),
+        }
+    }
+}
+
+type Session = AnySession;
 
 fn session() -> &'static Mutex<Option<Session>> {
     static S: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
@@ -83,10 +125,29 @@ pub extern "C" fn jlr_connect(port: *const c_char, baud: c_int) -> *mut c_char {
     guard(|| {
         let port = unsafe { in_str(port) }.to_string();
         let baud = if baud > 0 { baud as u32 } else { 500_000 };
-        match Session::open_serial(&port, baud) {
+        match CarSession::<SerialTransport>::open_serial(&port, baud) {
             Ok((s, status)) => {
                 if let Ok(mut g) = session().lock() {
-                    *g = Some(s);
+                    *g = Some(AnySession::Serial(s));
+                }
+                to_c(json!({ "ok": true, "status": status }))
+            }
+            Err(e) => to_c(json!({ "ok": false, "error": e })),
+        }
+    })
+}
+
+/// Conecta pelo fd do `UsbManager` (Android USB-OTG) e abre o canal ISO-TP.
+/// EXPERIMENTAL — ver `crates/diag/src/usb_fd.rs`.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn jlr_connect_fd(fd: c_int, baud: c_int) -> *mut c_char {
+    guard(|| {
+        let baud = if baud > 0 { baud as u32 } else { 500_000 };
+        match CarSession::<UsbFdTransport>::open_usb_fd(fd as std::os::fd::RawFd, baud) {
+            Ok((s, status)) => {
+                if let Ok(mut g) = session().lock() {
+                    *g = Some(AnySession::Usb(s));
                 }
                 to_c(json!({ "ok": true, "status": status }))
             }

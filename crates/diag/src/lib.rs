@@ -11,6 +11,11 @@ use std::time::Duration;
 use mongoose::client::Device;
 use mongoose::Transport;
 
+#[cfg(target_os = "android")]
+mod usb_fd;
+#[cfg(target_os = "android")]
+pub use usb_fd::UsbFdTransport;
+
 /// Um módulo endereçável: sigla, id de requisição (tx) e de resposta (rx).
 pub type ModuleAddr = (String, u16, u16);
 
@@ -107,6 +112,23 @@ impl CarSession<SerialTransport> {
     /// Abre a porta serial, inicializa o adaptador e abre o canal ISO-TP.
     pub fn open_serial(port: &str, baud: u32) -> Result<(Self, u32), String> {
         let transport = SerialTransport::open(port, baud)?;
+        let mut dev = Device::new(transport);
+        dev.timeout = Duration::from_millis(2500);
+        let info = dev
+            .open()
+            .map_err(|e| format!("abrir dispositivo: {e:?}"))?;
+        dev.connect_iso_tp(baud)
+            .map_err(|e| format!("conectar ISO-TP: {e:?}"))?;
+        Ok((Self { dev, baud }, info.status))
+    }
+}
+
+#[cfg(target_os = "android")]
+impl CarSession<UsbFdTransport> {
+    /// Abre a partir de um fd do `UsbManager` (Android USB-OTG), inicializa o
+    /// adaptador e abre o canal ISO-TP. EXPERIMENTAL — ver `usb_fd.rs`.
+    pub fn open_usb_fd(fd: std::os::fd::RawFd, baud: u32) -> Result<(Self, u32), String> {
+        let transport = UsbFdTransport::open_fd(fd, baud)?;
         let mut dev = Device::new(transport);
         dev.timeout = Duration::from_millis(2500);
         let info = dev
