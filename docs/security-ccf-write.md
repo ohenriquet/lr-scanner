@@ -1,212 +1,212 @@
-# SecurityAccess e gravação do CCF (L319 BCM) — notas
+# SecurityAccess and CCF writing (L319 BCM) — notes
 
-Objetivo: habilitar opções de conforto (welcome/approach/puddle lights etc.)
-gravando o CCF no BCM. Isso exige desbloqueio por SecurityAccess (UDS 0x27).
-Fonte: dados do SDD decifrados + desmontagem da `SecAlg.dll` + cruzamento com
-engenharia reversa pública do EUCD Ford/JLR.
+Goal: enable comfort options (welcome/approach/puddle lights, etc.) by writing
+the CCF to the BCM. This requires an unlock via SecurityAccess (UDS 0x27).
+Source: decrypted SDD data + disassembly of `SecAlg.dll` + cross-checking with
+public reverse engineering of the Ford/JLR EUCD.
 
-## O que já se sabe (do SDD decifrado)
+## What is already known (from decrypted SDD)
 
-- O CCF é lido/gravado no BCM por DID 0xDE00 (serviço 0x22 ler, 0x2E gravar),
-  sessão estendida (0x10 0x03). Confirmado: a leitura de 0xDE00 devolve 1024
-  bytes (validado no carro).
-- Gravar DIDs de configuração do BCM exige `security_level_1` (MDX_BCM).
-- `BCM.xml` (swdl) deste BCM: `SECURITY_ALGORITHM_ID=0`,
+- The CCF is read/written on the BCM via DID 0xDE00 (service 0x22 read, 0x2E
+  write), extended session (0x10 0x03). Confirmed: reading 0xDE00 returns 1024
+  bytes (validated on the car).
+- Writing BCM configuration DIDs requires `security_level_1` (MDX_BCM).
+- This BCM's `BCM.xml` (swdl): `SECURITY_ALGORITHM_ID=0`,
   `NUMBER_OF_SECURITY_CONSTANTS=5`, `KEY_CONST_REF=168`.
-- `Security.xml` grupo Index 168 (Module=BCM, 5 SecData) é o deste BCM:
-  - SecLevel 0x01 (P, programação), constante DC0163
-  - **SecLevel 0x03 (D, diagnóstico), constante DC0164** ← grava CCF
+- `Security.xml` group Index 168 (Module=BCM, 5 SecData) is this BCM's:
+  - SecLevel 0x01 (P, programming), constant DC0163
+  - **SecLevel 0x03 (D, diagnostic), constant DC0164** ← writes CCF
   - SecLevel 0x11 (D), DC0165
   - SecLevel 0x21 (D), DC0165
-  - SecLevel 0x99 (X, especial), DC0009
-- Para o CCF (sessão diag + level 1): pedir semente com `0x27 0x03`, enviar
-  chave com `0x27 0x04`, usando a constante **DC0164** (5 bytes = 40 bits) e o
-  algoritmo ID 0.
+  - SecLevel 0x99 (X, special), DC0009
+- For the CCF (diag session + level 1): request the seed with `0x27 0x03`, send
+  the key with `0x27 0x04`, using constant **DC0164** (5 bytes = 40 bits) and
+  algorithm ID 0.
 
-## Cruzamento com a comunidade
+## Cross-check with the community
 
-Módulos EUCD legados Ford/JLR usam um LFSR de 24 bits: semente de 3 bytes,
-chave de 3 bytes, com 40 bits de segredo. Os 40 bits = exatamente as 5
-constantes por módulo do SDD. Diferença importante: o SDD **já traz o segredo**
-(DC0164), então não é preciso quebrar nada — só aplicar o LFSR. A forma exata
-(taps, ordem dos bytes, iterações) vem da `SecAlg.dll`.
+Legacy Ford/JLR EUCD modules use a 24-bit LFSR: 3-byte seed, 3-byte key, with 40
+bits of secret. Those 40 bits = exactly the 5 per-module constants from the SDD.
+Important difference: the SDD **already ships the secret** (DC0164), so nothing
+needs cracking — only applying the LFSR. The exact form (taps, byte order,
+iterations) comes from `SecAlg.dll`.
 
-Referências públicas (metodologia, não a chave da JLR):
-- Ford F-150 IPC SecurityAccess (LFSR 24 bits, 40 bits de segredo):
+Public references (methodology, not JLR's key):
+- Ford F-150 IPC SecurityAccess (24-bit LFSR, 40-bit secret):
   https://github.com/Ol-Swamp-Donkey/ford-f150-ipc-securityaccess
-- Mercedes IC204 (método de RE de seed/key com Ghidra):
+- Mercedes IC204 (seed/key RE method with Ghidra):
   https://github.com/Mattwmaster58/ic204
 
-## Sequência de gravação planejada (NÃO executada ainda)
+## Planned write sequence (NOT executed yet)
 
-1. `0x10 0x03` no BCM (0x726) — sessão estendida. Reversível.
-2. `0x27 0x03` → BCM responde `0x67 0x03 <semente>` (pedir semente é seguro,
-   não conta como tentativa falha).
-3. chave = algoritmo0(semente, DC0164).
-4. `0x27 0x04 <chave>` → `0x67 0x04` (ok) ou `0x7F 27 <NRC>`.
-   ATENÇÃO: chave errada repetida ativa atraso anti-brute-force no módulo.
-5. Montar o CCF alterado: ler os 1024 bytes atuais, mudar só o(s) byte(s) do
-   parâmetro desejado, recalcular os checksums do CCF (CHECKSUM_CCF_EUCD) e a
-   data (DATECALC_JAG_X150).
-6. Gravar `0x2E 0xDE00 <1024 bytes>` (ou a sequência VBF 0x34/0x36/0x37 se o
-   SDD usar essa via para o CARCFG).
-7. Reler 0xDE00 e conferir byte a byte. Tester present durante o processo.
+1. `0x10 0x03` on the BCM (0x726) — extended session. Reversible.
+2. `0x27 0x03` → BCM replies `0x67 0x03 <seed>` (requesting the seed is safe, it
+   does not count as a failed attempt).
+3. key = algorithm0(seed, DC0164).
+4. `0x27 0x04 <key>` → `0x67 0x04` (ok) or `0x7F 27 <NRC>`. CAUTION: a repeated
+   wrong key triggers the module's anti-brute-force delay.
+5. Assemble the modified CCF: read the current 1024 bytes, change only the
+   parameter's byte(s), recompute the CCF checksums (CHECKSUM_CCF_EUCD) and the
+   date (DATECALC_JAG_X150).
+6. Write `0x2E 0xDE00 <1024 bytes>` (or the VBF 0x34/0x36/0x37 sequence if the
+   SDD uses that path for CARCFG).
+7. Re-read 0xDE00 and compare byte by byte. Tester present during the process.
 
-## Pendências antes de qualquer gravação
+## To do before any write
 
-- [x] Algoritmo extraído: `GetSecurityCodeISO14229` (LFSR init 0xC541A9, poly
-  0x109028, 64 iterações). Implementado no crate `jlr-security`.
-- Reconstruir o checksum do CCF (CHECKSUM_CCF_EUCD) — provável nas DLLs de CCF.
-- [x] Gerador VALIDADO contra a `SecAlg.dll` do próprio SDD (export
-  `SECALG_GetSecurityKey`, algoritmo 32, semente de 3 bytes): 12/12 sementes
-  produzem chave idêntica. Oráculo 32 bits em `tools/secalg-oracle`.
-- Fazer sempre backup do CCF antes (já temos um) e ter plano de restauração.
+- [x] Algorithm extracted: `GetSecurityCodeISO14229` (LFSR init 0xC541A9, poly
+  0x109028, 64 iterations). Implemented in the `jlr-security` crate.
+- Reconstruct the CCF checksum (CHECKSUM_CCF_EUCD) — likely in the CCF DLLs.
+- [x] Generator VALIDATED against the SDD's own `SecAlg.dll` (export
+  `SECALG_GetSecurityKey`, algorithm 32, 3-byte seed): 12/12 seeds produce an
+  identical key. 32-bit oracle in `tools/secalg-oracle`.
+- Always back up the CCF first (we have one) and have a restore plan.
 
-## Segurança do procedimento
+## Procedure safety
 
-Pedir semente (0x27 03) é leitura e pode ser repetido. Só o envio de chave
-errada (0x27 04) penaliza. A estratégia é não enviar chave até ter alta
-confiança (algoritmo conferido e, de preferência, validado contra captura).
+Requesting the seed (0x27 03) is a read and may be repeated. Only sending a wrong
+key (0x27 04) is penalized. The strategy is to not send a key until we have high
+confidence (algorithm verified and, ideally, validated against a capture).
 
-## Checksum (reconstrução em andamento)
+## Checksum (reconstruction in progress)
 
-Algoritmo confirmado da `VbfConversion.dll` (`PerformEUCD_CCCChecksum`): soma de
-8 bits dos bytes de uma faixa, `checksum = soma & 0xff`. Pistas no CCF real do
-carro: `(-soma8(bloco1)) & 0xff == 0x53`, que é o `VEH_BUILD_CHECKSUM_BYTE_1`
-armazenado — ou seja, checksum de complemento de dois (soma de dados + byte de
-checksum ≡ 0 mod 256). Posições na imagem do DID 0xDE00: EUCD checksum em
-562/563, VEH_BUILD em 696/697 (bloco 5, bytes 2/3 e 136/137). Falta fixar a
-faixa exata de cada um (o SDD soma sobre o buffer VBF, cujo layout difere da
-imagem crua). Enquanto não fechado, `ccf-set` fica bloqueado; `ccf-writeback`
-(regravar idêntico) não precisa do checksum.
+Algorithm confirmed from `VbfConversion.dll` (`PerformEUCD_CCCChecksum`): 8-bit
+sum of the bytes in a range, `checksum = sum & 0xff`. Clues in the car's real
+CCF: `(-sum8(block1)) & 0xff == 0x53`, which is the stored
+`VEH_BUILD_CHECKSUM_BYTE_1` — i.e. a two's-complement checksum (data sum +
+checksum byte ≡ 0 mod 256). Positions in the DID 0xDE00 image: EUCD checksum at
+562/563, VEH_BUILD at 696/697 (block 5, bytes 2/3 and 136/137). The exact range
+of each is still to be pinned down (the SDD sums over the VBF buffer, whose layout
+differs from the raw image). Until closed, `ccf-set` is blocked; `ccf-writeback`
+(rewrite identical) does not need the checksum.
 
-## Sequência de gravação mapeada no carro (MY12 BCM)
+## Write sequence mapped on the car (MY12 BCM)
 
-Validado no BCM real da Discovery 4, via ISO-TP de software:
-1. `0x10 03` (sessão estendida) — ok.
-2. `0x27 03`/`0x04` desbloqueio DIAGNÓSTICO (constante DC0164) — ACEITO.
-3. `0x10 02` (sessão de programação) — ok (módulo segue vivo, 0x3E → 0x7E).
-4. `0x27 01`/`0x02` desbloqueio de PROGRAMAÇÃO (constante DC0163) — ACEITO.
-   O mesmo algoritmo `jlr-security` vale para o nível de programação.
-5. `0x34` RequestDownload — suportado SÓ na sessão de programação; com a
-   segurança ok responde `0x7F 34 31` (requestOutOfRange) para os endereços
-   do CCF (0xFFAC00, blocos e região). Ou seja, o 0x34 padrão aponta para a
-   região de firmware, não para o CCF.
+Validated on the Discovery 4's real BCM, via software ISO-TP:
+1. `0x10 03` (extended session) — ok.
+2. `0x27 03`/`0x04` DIAGNOSTIC unlock (constant DC0164) — ACCEPTED.
+3. `0x10 02` (programming session) — ok (module stays alive, 0x3E → 0x7E).
+4. `0x27 01`/`0x02` PROGRAMMING unlock (constant DC0163) — ACCEPTED. The same
+   `jlr-security` algorithm works for the programming level.
+5. `0x34` RequestDownload — supported ONLY in the programming session; with
+   security ok it replies `0x7F 34 31` (requestOutOfRange) for the CCF addresses
+   (0xFFAC00, blocks and region). So the standard 0x34 points to the firmware
+   region, not the CCF.
 
-Conclusão: a gravação do CCF NÃO é um RequestDownload comum para 0xFFAC00.
-É um mecanismo específico do SDD (provável DID/rotina proprietária ou um
-RequestDownload com endereço/formato lógico diferente). Para fechar com
-segurança, o caminho confiável é CAPTURAR o SDD gravando um CCF (shim J2534)
-e copiar a sequência exata (formato, endereço, tamanho do bloco, checksum).
+Conclusion: writing the CCF is NOT a plain RequestDownload to 0xFFAC00. It is an
+SDD-specific mechanism (likely a proprietary DID/routine or a RequestDownload with
+a different logical address/format). To close it safely, the reliable path is to
+CAPTURE the SDD writing a CCF (J2534 shim) and copy the exact sequence (format,
+address, block size, checksum).
 
-Já está validado e pronto: todo o encadeamento de sessão e segurança
-(diagnóstico E programação) no módulo real, e o ISO-TP de software para
-enviar/receber qualquer tamanho dentro do buffer de 128 bytes do BCM.
+Already validated and ready: the full session and security chain (diagnostic AND
+programming) on the real module, and the software ISO-TP to send/receive any size
+within the BCM's 128-byte buffer.
 
-## Sequência de flash do CCF — CONFIRMADA por RE (offline)
+## CCF flash sequence — CONFIRMED by RE (offline)
 
-Decompilei (Ghidra 12.2 headless) as DLLs do próprio SDD que gravam o CCF:
-`SessionCcf.dll` (orquestrador), `VISO14229.dll` (canal UDS ISO-14229),
-`SWDL.dll`/`SWDLInterface.dll` (motor de software download) e `LegacyFlash.dll`
-(descartada — é o reflash antigo de powertrain Denso/Jatco/ZF/Puma, J2190, não
-toca no CCF). Artefatos no scratchpad: `decomp_sessionccf.txt`,
+I decompiled (Ghidra 12.2 headless) the SDD's own DLLs that write the CCF:
+`SessionCcf.dll` (orchestrator), `VISO14229.dll` (UDS ISO-14229 channel),
+`SWDL.dll`/`SWDLInterface.dll` (software download engine) and `LegacyFlash.dll`
+(discarded — it is the old powertrain reflash for Denso/Jatco/ZF/Puma, J2190, it
+does not touch the CCF). Artifacts in the scratchpad: `decomp_sessionccf.txt`,
 `decomp_viso14229.txt`.
 
-**Descoberta central — a precondição que faltava.** O erase `31 01 FF00` só é
-aceito depois de ARMAR o módulo com uma rotina de "Programming Enable". Em
+**Central finding — the missing precondition.** The erase `31 01 FF00` is only
+accepted after ARMING the module with a "Programming Enable" routine. In
 `CSessionCcf::InitiateProgrammingEnableMode` (log: "Enabling SWDL Mode"):
 
 ```
-V14229_SetDiagnosticSession(0x03)   → 10 03   (sessão ESTENDIDA, não 10 02)
-ObtainDiagSecurityConstant(0x23) + V14229_SecureAccess → 27  (segurança DIAG)
+V14229_SetDiagnosticSession(0x03)   → 10 03   (EXTENDED session, not 10 02)
+ObtainDiagSecurityConstant(0x23) + V14229_SecureAccess → 27  (DIAG security)
 V14229_PerformRoutine(routineId=0x800E, controlType=1) → 31 01 80 0E   ★
 V14229_Disconnect
 ```
 
-Isso é chamado dentro de `CSessionCcf::InitiateBlockWriteSWDLProcess`, **só
-quando `SWDL_GetProgrammingEnableFlag()==1`** (flag por módulo; no BCM está
-ligado), e **antes** de `SWDL_StartJob()` — que é quem entra na sessão de
-programação e faz erase/0x34/0x36/0x37. Ou seja, nosso `7F 31 22`
-(conditionsNotCorrect) no erase era exatamente a ausência do `31 01 800E`.
+This is called inside `CSessionCcf::InitiateBlockWriteSWDLProcess`, **only when
+`SWDL_GetProgrammingEnableFlag()==1`** (per-module flag; on for the BCM), and
+**before** `SWDL_StartJob()` — which is what enters the programming session and
+does erase/0x34/0x36/0x37. So our `7F 31 22` (conditionsNotCorrect) on the erase
+was exactly the absence of `31 01 800E`.
 
-O canal UDS do SDD (`CISO14229Channel`) implementa 10, 11, 19, 27, 31, 34, 36,
-37, 85 — e **NÃO** implementa CommunicationControl (0x28). Logo o preâmbulo não
-usa 0x28 (hipótese anterior descartada).
+The SDD's UDS channel (`CISO14229Channel`) implements 10, 11, 19, 27, 31, 34, 36,
+37, 85 — and does **NOT** implement CommunicationControl (0x28). So the preamble
+does not use 0x28 (earlier hypothesis discarded).
 
-**Sequência completa de gravação (implementada em `ccf-flash`):**
-1. `10 03` + `27` diag (DC0164) — sessão estendida + segurança diagnóstica.
+**Full write sequence (implemented in `ccf-flash`):**
+1. `10 03` + `27` diag (DC0164) — extended session + diagnostic security.
 2. `31 01 80 0E` (startRoutine, Programming Enable / Enabling SWDL Mode). ★
-3. `10 02` + `27` prog (DC0163) — sessão de programação.
+3. `10 02` + `27` prog (DC0163) — programming session.
 4. `31 01 FF00 <addr 0xFFAC00> <len 0x400>` — erase.
 5. `34 00 44 <addr> <len 698>` — RequestDownload.
-6. `36 <seq> <dados>` em pedaços ≤ maxBlockLength − 2.
+6. `36 <seq> <data>` in chunks ≤ maxBlockLength − 2.
 7. `37` — RequestTransferExit.
-8. `11 01` — ECUReset; religa DTC/comunicação; reler `0xDE00` e conferir.
+8. `11 01` — ECUReset; re-enables DTC/communication; re-read `0xDE00` and verify.
 
-**Única incerteza residual:** a RE mostra a segurança do passo 2 vindo de
-`ObtainDiagSecurityConstantFromAccessLevel(0x23)`; os níveis do grupo 168 do BCM
-são 0x03/0x11/0x21 (0x23 não bate). Pode ser um "access level" interno do SDD
-que mapeia para a constante diag padrão (DC0164, a que já usamos e que abre a
-diag), ou exigir DC0165. O comando `ccf-flash` em modo PROBE (sem `--write`)
-roda 1→3 e já mostra a resposta do `31 01 800E`: `71` = armado; `7F 31 33` =
-nível de segurança diferente (tentar DC0165 antes do 800E); `7F 31 xx` = outro.
-Isso é não-destrutivo (não apaga nada), então é o primeiro teste no carro.
+**Only residual uncertainty:** the RE shows step 2's security coming from
+`ObtainDiagSecurityConstantFromAccessLevel(0x23)`; the BCM's group 168 levels are
+0x03/0x11/0x21 (0x23 does not match). It may be an SDD-internal "access level"
+mapping to the default diag constant (DC0164, the one we already use and that
+opens diag), or it may require DC0165. The `ccf-flash` command in PROBE mode
+(no `--write`) runs 1→3 and shows the `31 01 800E` reply: `71` = armed;
+`7F 31 33` = different security level (try DC0165 before 800E); `7F 31 xx` = other.
+That is non-destructive (erases nothing), so it is the first test on the car.
 
-## ATUALIZAÇÃO (teste no carro + dados decifrados): 0x800E DESCARTADO
+## UPDATE (on-car test + decrypted data): 0x800E DISCARDED
 
-O probe no carro deu **`31 01 800E` → `7F 31 31` (requestOutOfRange)**: este BCM
-não tem esse routineId (o `0x800E` do `InitiateProgrammingEnableMode` é de outra
-plataforma). Desbloqueio diagnóstico 100% (seed→key ok). Nada foi gravado.
+The probe on the car gave **`31 01 800E` → `7F 31 31` (requestOutOfRange)**: this
+BCM does not have that routineId (the `0x800E` from `InitiateProgrammingEnableMode`
+is from another platform). Diagnostic unlock 100% (seed→key ok). Nothing written.
 
-Decifrando os dados do SDD (via o novo `sdd-import decrypt`):
+Decrypting the SDD data (via the new `sdd-import decrypt`):
 - `IDS/Xml/L319_201200/BCM.exml` (SWDL): `SOFTWARE_DOWNLOAD_PHASE=3` (spec
   "SWDL-004"), `SECURITY_ALGORITHM_ID=0`, `KEY_CONST_REF=168`,
-  `READ_ECU_SERIAL_NO=1`. **Não há `PROGRAMMING_ENABLE_MODE`**.
-- `IDS/Xml/L319_201200/MDX_BCM.exml`: a tabela `ROUTINE_IDENTIFIERS` do BCM NÃO
-  contém `FF00`. Ou seja, **o erase FF00 é rotina de BOOTLOADER**, não de
-  aplicação. Daí `conditionsNotCorrect` (reconhecida, mas o módulo não está
-  realmente em modo de programação) em vez de `requestOutOfRange`. As rotinas de
-  aplicação (0202 Self Test, 716E "Start Control Unit Program" no cluster
-  PATS/chave, etc.) são todas de sessão estendida (session_03).
+  `READ_ECU_SERIAL_NO=1`. **No `PROGRAMMING_ENABLE_MODE`**.
+- `IDS/Xml/L319_201200/MDX_BCM.exml`: the BCM's `ROUTINE_IDENTIFIERS` table does
+  NOT contain `FF00`. So **the erase FF00 is a BOOTLOADER routine**, not an
+  application one. Hence `conditionsNotCorrect` (recognized, but the module is not
+  actually in programming mode) instead of `requestOutOfRange`. The application
+  routines (0202 Self Test, 716E "Start Control Unit Program" in the PATS/key
+  cluster, etc.) are all extended-session (session_03).
 
-**Conclusão corrigida:** `10 02` responde `0x50`, mas o BCM não entra de fato no
-bootloader. O candidato mais forte (strings do SessionCcf.dll: "Initialise bus
-with Programming Sessions" / "2 sec burst of Prog Sessions") é **martelar `10 02`
-por ~2 s** para forçar a entrada — hoje mandávamos uma vez. Implementado em
-`ccf-flash` (burst por padrão; `--no-preamble` desliga; `--start-routine <hex>`
-roda uma rotina na sessão ESTENDIDA, p/ testar p.ex. 716E na sessão certa).
-Como o erase auto-aborta se negado, testar `--write` é seguro.
+**Corrected conclusion:** `10 02` replies `0x50`, but the BCM does not actually
+enter the bootloader. The strongest candidate (strings in SessionCcf.dll:
+"Initialise bus with Programming Sessions" / "2 sec burst of Prog Sessions") is to
+**hammer `10 02` for ~2 s** to force entry — today we send it once. Implemented in
+`ccf-flash` (burst by default; `--no-preamble` disables it; `--start-routine <hex>`
+runs a routine in the EXTENDED session, e.g. to test 716E in the right session).
+Since the erase self-aborts if denied, testing `--write` is safe.
 
-**Se o burst não resolver:** o caminho definitivo é a captura via shim J2534
-(Fase 2) — observar o SDD gravando um CCF e copiar a sequência exata.
+**If the burst does not solve it:** the definitive path is capture via a J2534
+shim (phase 2) — observe the SDD writing a CCF and copy the exact sequence.
 
-Ferramenta nova: `sdd-import decrypt --file X.exml --out Y.xml` decifra qualquer
-`.exml` (3DES) com a chave do crate `sdd-crypto`.
+New tool: `sdd-import decrypt --file X.exml --out Y.xml` decrypts any `.exml`
+(3DES) with the `sdd-crypto` crate key.
 
-## CONCLUSÃO: gravação do CCF exige SBL (não está no SDD local)
+## CONCLUSION: CCF writing needs an SBL (not in a local SDD)
 
-Pesquisa + teste no carro + RE convergem: a gravação do CCF no BCM L319 baixa um
-**Secondary Boot Loader (SBL)** para a RAM do módulo (via 34/36/37) e o inicia;
-só então o erase 0xFF00 e o download do CCF são aceitos. Sem o SBL, o bootloader
-primário recusa o erase com `7F 31 22` (conditionsNotCorrect) — exatamente o que
-observamos, mesmo com sessão de programação (burst 18/18 `0x50`), segurança OK e
-formato de erase correto.
+Research + on-car test + RE converge: writing the CCF on the L319 BCM downloads a
+**Secondary Boot Loader (SBL)** to the module's RAM (via 34/36/37) and starts it;
+only then are the erase 0xFF00 and the CCF download accepted. Without the SBL, the
+primary bootloader rejects the erase with `7F 31 22` (conditionsNotCorrect) —
+exactly what we see, even with a programming session (burst 18/18 `0x50`),
+security ok and the correct erase format.
 
-Evidências:
-- `CSessionCcf` (decompilado): caminho do CCF tem `DownloadGBL`, `CreateSBLSession`,
+Evidence:
+- `CSessionCcf` (decompiled): the CCF path has `DownloadGBL`, `CreateSBLSession`,
   `GetSBLNode`, "Download GBL to get control of subnetwork".
-- Comunidade: r/CarHacking "Updating CCF on car - SBL needed"; SBLs ficam em
-  servidor online da JLR, não no SDD.
-- Instalação local: só há VBF `_CCF` (CARCFG) do BCM; nenhum SBL/GBL do L319
-  (os únicos SBL/GBL presentes são L322 IGWM, X150/X250 ICM, e uns genéricos em
+- Community: r/CarHacking "Updating CCF on car - SBL needed"; SBLs live on JLR's
+  online server, not in the SDD.
+- Local install: only the BCM's `_CCF` (CARCFG) VBF exists; no L319 SBL/GBL (the
+  only SBL/GBL present are L322 IGWM, X150/X250 ICM, and some generic ones in
   IDS/Flash).
 
-Caminhos reais para destravar a gravação:
-1. Obter o SBL do BCM L319 (TOPIx online da JLR, ou da comunidade). Com o VBF do
-   SBL, o fluxo fica: download SBL -> start -> erase -> write CCF, tudo offline.
-2. Captura via shim J2534 com o SDD rodando ONLINE (ele busca o SBL e grava; nós
-   copiamos a sequência exata).
-3. Ferramentas comerciais (Abrites AVDI, Diatronik Pluto) já trazem os SBLs.
+Real paths to unlock writing:
+1. Obtain the L319 BCM SBL (JLR TOPIx online, or from the community). With the SBL
+   VBF, the flow becomes: download SBL -> start -> erase -> write CCF, all offline.
+2. Capture via J2534 shim with the SDD running ONLINE (it fetches the SBL and
+   writes; we copy the exact sequence).
+3. Commercial tools (Abrites AVDI, Diatronik Pluto) already ship the SBLs.
 
-Toda a LEITURA/decode do CCF e o diagnóstico (VIN, módulos, DTCs, live) já
-funcionam; só a GRAVAÇÃO depende do SBL.
+All CCF READING/decoding and diagnostics (VIN, modules, DTCs, live) already work;
+only WRITING depends on the SBL.

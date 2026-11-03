@@ -1,67 +1,65 @@
-# Protocolo do Mongoose Pro JLR — notas e validação
+# Mongoose Pro JLR protocol — notes and validation
 
-Implementado no crate `mongoose`. Baseado no `PROTOCOL.md` de
-`dgcarr/Mongoose-USB-2-OBDII-Linux-Driver` (LGPL-2.1) e validado contra o
-adaptador físico do usuário.
+Implemented in the `mongoose` crate. Based on the `PROTOCOL.md` from
+`dgcarr/Mongoose-USB-2-OBDII-Linux-Driver` (LGPL-2.1) and validated against the
+user's physical adapter.
 
-## Descoberta importante: no Windows é uma porta COM (CDC-ACM)
+## Key finding: on Windows it is a COM port (CDC-ACM)
 
-Plugado no Windows 11, o adaptador (USB `18E1:0104`, "Drew Technologies Inc.")
-enumera como **Dispositivo Serial USB** ligado ao driver embutido `usbser`,
-criando uma porta COM (ex.: COM5). **Não é preciso o driver KMDF do fornecedor
-nem o Visual Studio.** Falamos o protocolo nativo direto pela porta serial, o
-mesmo caminho do Linux (`/dev/ttyACM*`) e macOS (`/dev/cu.usbmodem*`). Isso
-simplifica o porte em todas as plataformas e viabiliza o Android via USB-host
-CDC-ACM.
+Plugged into Windows 11, the adapter (USB `18E1:0104`, "Drew Technologies Inc.")
+enumerates as a **USB Serial Device** bound to the built-in `usbser` driver,
+creating a COM port (e.g. COM5). **No vendor KMDF driver nor Visual Studio is
+required.** We speak the native protocol directly over the serial port, the same
+path as Linux (`/dev/ttyACM*`) and macOS (`/dev/cu.usbmodem*`). This simplifies
+the port on every platform and makes Android possible over USB-host CDC-ACM.
 
-## Enquadramento (implementado em `frame.rs`)
+## Framing (implemented in `frame.rs`)
 
-- Prefixo de transporte (4 bytes): comprimento `N` do corpo em `u16` LE, depois
-  `N XOR 0x51E6` em `u16` LE. `1 <= N <= 0x1800`.
-- Cabeçalho do corpo (12 bytes): dest `u16` LE, source `u16` LE, opcode
-  `u16` LE, seq `u16` LE, 4 bytes reservados. Dados após o byte 12.
-- Respostas: `req | 0x8000`; a partir de `corpo+12` há `u32` status,
-  `corpo+16` contador de microssegundos, `corpo+20` dados (ou texto de erro).
+- Transport prefix (4 bytes): body length `N` as `u16` LE, then `N XOR 0x51E6`
+  as `u16` LE. `1 <= N <= 0x1800`.
+- Body header (12 bytes): dest `u16` LE, source `u16` LE, opcode `u16` LE, seq
+  `u16` LE, 4 reserved bytes. Data after byte 12.
+- Replies: `req | 0x8000`; from `body+12` there is a `u32` status, `body+16` a
+  microsecond counter, `body+20` the data (or error text).
 
-## Handshake de leitura validado (bancada, sem carro)
+## Validated read handshake (bench, no car)
 
-`mongoose-bench --port COM5`, adaptador do usuário (serial AOLHE0000003666A):
+`mongoose-bench --port COM5`, user's adapter (serial AOLHE0000003666A):
 
-| Comando | Opcode | Resultado |
+| Command | Opcode | Result |
 |---|---|---|
-| cEchoPacket | 0x0100 | ecoou `01 02 03 04` exatamente |
+| cEchoPacket | 0x0100 | echoed `01 02 03 04` exactly |
 | cOpenDevice | 0x0003 | status 0x00000000 |
-| cGetBoardInfo | 0x0109 | status 0, dados de placa (abaixo) |
+| cGetBoardInfo | 0x0109 | status 0, board data (below) |
 
-Board info (dados após status+timestamp), observado:
+Board info (data after status+timestamp), observed:
 `05 02 01 01 B4 B0 00 00 D8 55 00 00 00 08 01 01 00 10 01 01 ...`
-Os blocos `00 10 01 01` e `00 08 01 01` correspondem a firmware 1.1.16.0 e
-bootloader 1.1.8.0 (o `GatewayManager.ini` do SDD lista "FW:1.1.16.0
-BL:1.1.8.0"). O layout completo será formalizado ao implementar a parte CAN.
+The blocks `00 10 01 01` and `00 08 01 01` correspond to firmware 1.1.16.0 and
+bootloader 1.1.8.0 (SDD's `GatewayManager.ini` lists "FW:1.1.16.0 BL:1.1.8.0").
+The full layout will be formalized when the CAN part is implemented.
 
-## Pendente (precisa do carro ou de captura adicional)
+## Pending (needs the car or extra captures)
 
-- Abrir canal CAN (0x0006, canal `0x0501`) e ISO15765 (`0x0601`), baud e flags.
-- cSetPin (0x0012): corpo `(1,6,14)` para HS-CAN (pinos 6/14); o corpo para
-  MS-CAN (pinos 3/11), onde fica o broadcast do CCF, ainda não é conhecido —
-  obter por captura USB do driver oficial (USBPcap).
-- cOutboundData / cInboundData (0x0008 / 0x0009), filtros de flow control ISO-TP
-  (cTableAddEntry 0x000D, seletor 2).
-- Leitura de tensão da bateria (cIoctl / cSetPin).
+- Open a CAN channel (0x0006, channel `0x0501`) and ISO15765 (`0x0601`), baud and
+  flags.
+- cSetPin (0x0012): body `(1,6,14)` for HS-CAN (pins 6/14); the body for MS-CAN
+  (pins 3/11), where the CCF broadcast lives, is not known yet — obtain it from a
+  USB capture of the official driver (USBPcap).
+- cOutboundData / cInboundData (0x0008 / 0x0009), ISO-TP flow-control filters
+  (cTableAddEntry 0x000D, selector 2).
+- Battery voltage reading (cIoctl / cSetPin).
 
-## Limite de transmissão ISO-TP: 128 bytes (achado no carro)
+## ISO-TP transmit limit: 128 bytes (found on the car)
 
-Validado no BCM da Discovery 4: a transmissão ISO-TP do adaptador (um
-`cOutboundData` de protocolo 6) completa até **128 bytes de payload**; a partir
-de ~130 bytes a transmissão multi-quadro trava e o módulo não recebe nada (sem
-resposta). A RECEPÇÃO multi-quadro funciona (ler 1 KB do DID 0xDE00 funciona),
-pois o adaptador gera o controle de fluxo sozinho. É um buffer de TX de 128 bytes
-no firmware.
+Validated on the Discovery 4 BCM: the adapter's ISO-TP transmit (a protocol-6
+`cOutboundData`) completes up to **128 payload bytes**; from ~130 bytes on, the
+multi-frame transmit stalls and the module receives nothing (no reply). Multi-
+frame RECEIVE works (reading 1 KB from DID 0xDE00 works), because the adapter
+generates flow control on its own. It is a 128-byte TX buffer in the firmware.
 
-Consequência: gravar o CCF (1024 bytes) por um único `0x2E DE00` é impossível
-com a pilha de firmware. Opções: (a) implementar o ISO-TP de TRANSMISSÃO em
-software sobre canal CAN cru (protocolo 5), fatiando em quadros e tratando o
-flow control do módulo (BS/STmin, múltiplos blocos) — o que o DLL oficial faz;
-(b) usar a sequência de download em blocos (0x34/0x36/0x37) com TransferData
-≤128 bytes. O SecurityAccess do BCM já está validado no carro (semente/chave
-aceitas).
+Consequence: writing the CCF (1024 bytes) with a single `0x2E DE00` is impossible
+with the firmware stack. Options: (a) implement the ISO-TP TRANSMIT in software
+over a raw CAN channel (protocol 5), slicing into frames and handling the module's
+flow control (BS/STmin, multiple blocks) — what the official DLL does; (b) use the
+block download sequence (0x34/0x36/0x37) with TransferData ≤128 bytes. The BCM's
+SecurityAccess is already validated on the car (seed/key accepted).
