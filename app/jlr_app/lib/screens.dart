@@ -19,7 +19,7 @@ class _Content extends StatelessWidget {
 Widget _sectionTitle(String t) => Padding(
       padding: const EdgeInsets.fromLTRB(2, 6, 2, 8),
       child: Text(t,
-          style: const TextStyle(
+          style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.6,
@@ -105,7 +105,7 @@ class PainelScreen extends StatelessWidget {
                     ])
                   else if (car.connectError != null)
                     Text('Falha ao conectar: ${car.connectError}',
-                        style: const TextStyle(fontSize: 11.5, color: C.crit))
+                        style: TextStyle(fontSize: 11.5, color: C.crit))
                   else
                     Text(
                       'VIN, falhas ativas e valores de sensor são leituras do '
@@ -247,7 +247,7 @@ class _LiveScreenState extends State<LiveScreen> {
                       value: _module,
                       underline: const SizedBox(),
                       dropdownColor: C.panel2,
-                      style: const TextStyle(color: C.ink, fontSize: 14),
+                      style: TextStyle(color: C.ink, fontSize: 14),
                       items: [
                         for (final m in mods)
                           DropdownMenuItem(
@@ -273,11 +273,11 @@ class _LiveScreenState extends State<LiveScreen> {
                         prefixIcon: const Icon(Icons.search, size: 18),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(9),
-                          borderSide: const BorderSide(color: C.line),
+                          borderSide: BorderSide(color: C.line),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(9),
-                          borderSide: const BorderSide(color: C.line),
+                          borderSide: BorderSide(color: C.line),
                         ),
                       ),
                     ),
@@ -291,7 +291,7 @@ class _LiveScreenState extends State<LiveScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               itemCount: params.length,
               separatorBuilder: (_, _) =>
-                  const Divider(height: 1, color: C.line),
+                  Divider(height: 1, color: C.line),
               itemBuilder: (_, i) => _paramRow(params[i]),
             ),
           ),
@@ -411,11 +411,11 @@ class _FalhasScreenState extends State<FalhasScreen> {
                     prefixIcon: const Icon(Icons.search, size: 18),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(9),
-                      borderSide: const BorderSide(color: C.line),
+                      borderSide: BorderSide(color: C.line),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(9),
-                      borderSide: const BorderSide(color: C.line),
+                      borderSide: BorderSide(color: C.line),
                     ),
                   ),
                 ),
@@ -471,8 +471,8 @@ class _FalhasScreenState extends State<FalhasScreen> {
                 ),
               ),
               if (car.dtcsScanning)
-                const Padding(
-                  padding: EdgeInsets.only(right: 10),
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
                   child: SizedBox(
                       width: 14,
                       height: 14,
@@ -724,11 +724,11 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         prefixIcon: const Icon(Icons.search, size: 18),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(9),
-                          borderSide: const BorderSide(color: C.line),
+                          borderSide: BorderSide(color: C.line),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(9),
-                          borderSide: const BorderSide(color: C.line),
+                          borderSide: BorderSide(color: C.line),
                         ),
                       ),
                     ),
@@ -757,7 +757,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(2, 10, 2, 6),
                     child: Text(e.key.toUpperCase(),
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.5,
@@ -767,7 +767,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     child: Column(
                       children: [
                         for (var i = 0; i < e.value.length; i++) ...[
-                          if (i > 0) const Divider(height: 1, color: C.line),
+                          if (i > 0) Divider(height: 1, color: C.line),
                           _ccfRow(car, e.value[i]),
                         ]
                       ],

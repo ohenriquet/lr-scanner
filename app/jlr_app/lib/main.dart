@@ -7,19 +7,49 @@ import 'theme.dart';
 
 void main() => runApp(const JlrApp());
 
-class JlrApp extends StatelessWidget {
+class JlrApp extends StatefulWidget {
   const JlrApp({super.key});
+  @override
+  State<JlrApp> createState() => _JlrAppState();
+}
+
+class _JlrAppState extends State<JlrApp> with WidgetsBindingObserver {
+  // null = segue o tema do sistema; senão, override do usuário pelo toggle.
+  Brightness? _override;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    if (_override == null) setState(() {}); // segue o SO ao vivo
+  }
+
+  Brightness get _effective =>
+      _override ??
+      WidgetsBinding.instance.platformDispatcher.platformBrightness;
+
+  void _toggleTheme() => setState(() =>
+      _override = _effective == Brightness.dark ? Brightness.light : Brightness.dark);
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: C.accent,
-      brightness: Brightness.dark,
-    ).copyWith(
+    final b = _effective;
+    C.brightness = b; // a paleta global (C.*) segue o tema ativo
+    final scheme = ColorScheme.fromSeed(seedColor: C.accent, brightness: b).copyWith(
       surface: C.panel,
       surfaceContainerHighest: C.panel2,
       primary: C.accent,
-      onPrimary: const Color(0xFF07201E),
+      onPrimary: b == Brightness.dark ? const Color(0xFF07201E) : Colors.white,
       outline: C.line,
     );
     return MaterialApp(
@@ -29,26 +59,32 @@ class JlrApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: scheme,
         scaffoldBackgroundColor: C.bg,
-        cardTheme: const CardThemeData(
+        cardTheme: CardThemeData(
           color: C.panel,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(14)),
+            borderRadius: const BorderRadius.all(Radius.circular(14)),
             side: BorderSide(color: C.line),
           ),
         ),
-        textTheme: Typography.whiteMountainView.apply(
-          bodyColor: C.ink,
-          displayColor: C.ink,
-        ),
+        textTheme: (b == Brightness.dark
+                ? Typography.whiteMountainView
+                : Typography.blackMountainView)
+            .apply(bodyColor: C.ink, displayColor: C.ink),
       ),
-      home: const HomeShell(),
+      home: HomeShell(brightness: b, onToggleTheme: _toggleTheme),
     );
   }
 }
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({
+    super.key,
+    required this.brightness,
+    required this.onToggleTheme,
+  });
+  final Brightness brightness;
+  final VoidCallback onToggleTheme;
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
@@ -93,13 +129,13 @@ class _HomeShellState extends State<HomeShell> {
                 padding: const EdgeInsets.all(24),
                 child: Text('Erro ao carregar o pacote:\n${snap.error}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: C.crit)),
+                    style: TextStyle(color: C.crit)),
               ),
             ),
           );
         }
         if (!snap.hasData) {
-          return const Scaffold(
+          return Scaffold(
             body: Center(child: CircularProgressIndicator(color: C.accent)),
           );
         }
@@ -163,7 +199,7 @@ class _HomeShellState extends State<HomeShell> {
             surfaceTintColor: Colors.transparent,
             title: Row(
               children: [
-                const Icon(Icons.monitor_heart_outlined, color: C.accent, size: 20),
+                Icon(Icons.monitor_heart_outlined, color: C.accent, size: 20),
                 const SizedBox(width: 8),
                 const Text('JLR OpenDiag',
                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
@@ -173,14 +209,27 @@ class _HomeShellState extends State<HomeShell> {
               ],
             ),
             actions: [
+              IconButton(
+                tooltip: widget.brightness == Brightness.dark
+                    ? 'Tema claro'
+                    : 'Tema escuro',
+                onPressed: widget.onToggleTheme,
+                icon: Icon(
+                  widget.brightness == Brightness.dark
+                      ? Icons.light_mode_outlined
+                      : Icons.dark_mode_outlined,
+                  color: C.ink2,
+                  size: 20,
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: ListenableBuilder(
                   listenable: car,
                   builder: (context, _) {
                     if (car.connecting || car.reading) {
-                      return const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 14),
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: SizedBox(
                             width: 18,
                             height: 18,
@@ -195,7 +244,7 @@ class _HomeShellState extends State<HomeShell> {
                         label: const Text('Desconectar'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: C.good,
-                          side: const BorderSide(color: C.line),
+                          side: BorderSide(color: C.line),
                         ),
                       );
                     }
@@ -205,15 +254,15 @@ class _HomeShellState extends State<HomeShell> {
                       label: const Text('Conectar'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: C.ink2,
-                        side: const BorderSide(color: C.line),
+                        side: BorderSide(color: C.line),
                       ),
                     );
                   },
                 ),
               ),
             ],
-            bottom: const PreferredSize(
-              preferredSize: Size.fromHeight(1),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(1),
               child: Divider(height: 1, color: C.line),
             ),
           ),
@@ -252,7 +301,7 @@ class _HomeShellState extends State<HomeShell> {
         builder: (_) => AlertDialog(
           backgroundColor: C.panel,
           title: const Text('Conexão com o carro'),
-          content: const Text(
+          content: Text(
             'Esta é a versão web (sem acesso a hardware). A leitura do carro '
             '(VIN, falhas ativas, valores de sensor) exige o app nativo '
             '(Windows/macOS/Android), que fala com o Mongoose pela ponte FFI.\n\n'
@@ -291,7 +340,7 @@ class _HomeShellState extends State<HomeShell> {
               decoration: const InputDecoration(labelText: 'Baud (HS-CAN)'),
             ),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'Lê VIN, varre os módulos e lê as falhas ativas. Ignição ligada, '
               'motor desligado. Nada é gravado.',
               style: TextStyle(fontSize: 11.5, color: C.ink3),
