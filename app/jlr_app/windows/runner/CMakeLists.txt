@@ -38,3 +38,14 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Ponte nativa de diagnóstico (cdylib Rust): copia a jlr_bridge.dll para junto
+# do .exe após o build, para `flutter run`/debug. (No `flutter build`, a DLL é
+# empacotada pelo install() em ../CMakeLists.txt.) Compile antes com:
+#   cargo build --release -p jlr-bridge
+set(JLR_BRIDGE_DLL "${CMAKE_SOURCE_DIR}/../../../target/release/jlr_bridge.dll")
+if(EXISTS "${JLR_BRIDGE_DLL}")
+  add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${JLR_BRIDGE_DLL}" "$<TARGET_FILE_DIR:${BINARY_NAME}>")
+endif()

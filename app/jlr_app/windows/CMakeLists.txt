@@ -115,11 +115,10 @@ set(JLR_BRIDGE_DLL
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../target/release/jlr_bridge.dll"
     CACHE FILEPATH "Caminho da jlr_bridge.dll")
 if(EXISTS "${JLR_BRIDGE_DLL}")
-  # flutter run: copia a DLL para junto do .exe compilado.
-  add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${JLR_BRIDGE_DLL}" "$<TARGET_FILE_DIR:${BINARY_NAME}>")
   # flutter build windows: inclui a DLL no bundle, junto do .exe.
+  # (A cópia para o dev/`flutter run` fica no runner/CMakeLists.txt, onde o
+  #  alvo ${BINARY_NAME} é criado — add_custom_command(TARGET) exige o mesmo
+  #  diretório do alvo.)
   install(FILES "${JLR_BRIDGE_DLL}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 else()
