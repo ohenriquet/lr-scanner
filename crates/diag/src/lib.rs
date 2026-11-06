@@ -1,6 +1,9 @@
-//! Leitura de diagnóstico do veículo sobre o Mongoose: VIN, presença de
-//! módulos, DTCs e leitura crua de DIDs. Reaproveitado pelo `car-scan` (futuro)
-//! e pela ponte FFI do app (`bridge`).
+//! Diagnóstico do veículo sobre o Mongoose: VIN, presença de módulos, DTCs,
+//! leitura crua de DIDs e limpeza de DTCs. Reaproveitado pelo `car-scan`
+//! (futuro) e pela ponte FFI do app (`bridge`).
+//!
+//! Tudo aqui é LEITURA, exceto [`CarSession::clear_dtcs`] (UDS 0x14), que apaga
+//! a memória de falhas dos módulos — o app só chama com confirmação do usuário.
 //!
 //! Os endereços de módulo NÃO são fixos aqui: o chamador passa a lista
 //! `(sigla, req, resp)` derivada do pacote do veículo, mantendo isto genérico.
@@ -8,7 +11,7 @@
 use std::io::{Read, Write};
 use std::time::Duration;
 
-use mongoose::client::Device;
+use mongoose::client::{Device, IsoTpResponse};
 use mongoose::Transport;
 
 #[cfg(target_os = "android")]
@@ -102,7 +105,37 @@ pub struct ModuleDtcs {
     pub dtcs: Vec<Dtc>,
 }
 
-/// Sessão de leitura com o veículo (somente leitura; não grava nada).
+/// Resultado da limpeza de DTCs (UDS 0x14) em um módulo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClearOutcome {
+    /// Resposta positiva `54`: memória de falhas apagada.
+    Cleared,
+    /// Resposta negativa `7F 14 <NRC>` (ex.: 0x22 condições não atendidas).
+    Refused(u8),
+    /// Nenhuma resposta do módulo dentro do tempo.
+    NoResponse,
+}
+
+/// Classifica as respostas de um `14 FF FF FF` para o módulo `resp`.
+///
+/// Uma positiva (`54`) vence qualquer negativa; o NRC `0x78` (resposta
+/// pendente) não é recusa — o módulo ainda vai responder — e é ignorado.
+pub fn classify_clear(answers: &[IsoTpResponse], resp: u16) -> ClearOutcome {
+    let mine = || answers.iter().filter(|r| r.can_id == resp as u32);
+    if mine().any(|r| r.service.first() == Some(&0x54)) {
+        return ClearOutcome::Cleared;
+    }
+    let refused = mine().find_map(|r| match r.service.as_slice() {
+        [0x7F, 0x14, nrc, ..] if *nrc != 0x78 => Some(*nrc),
+        _ => None,
+    });
+    match refused {
+        Some(nrc) => ClearOutcome::Refused(nrc),
+        None => ClearOutcome::NoResponse,
+    }
+}
+
+/// Sessão de diagnóstico com o veículo. Só lê, exceto [`Self::clear_dtcs`].
 pub struct CarSession<T: Transport<Error: 'static>> {
     pub dev: Device<T>,
     pub baud: u32,
@@ -218,6 +251,23 @@ impl<T: Transport<Error: 'static>> CarSession<T> {
         out
     }
 
+    /// Apaga os DTCs (UDS 0x14, grupo 0xFFFFFF = todos) dos módulos informados.
+    /// ESCREVE no veículo (zera a memória de falhas). Releia os DTCs depois.
+    pub fn clear_dtcs(&mut self, modules: &[ModuleAddr]) -> Vec<(String, ClearOutcome)> {
+        let mut out = Vec::new();
+        for (name, req, resp) in modules {
+            let _ = self.dev.add_flow_control_filter(*resp, *req);
+            // Coleta por tempo fixo: cobre o `7F 14 78` (pendente) + a `54` final
+            // de módulos que demoram a apagar a EEPROM.
+            let answers = self
+                .dev
+                .request_iso_tp(*req, &[0x14, 0xFF, 0xFF, 0xFF], Duration::from_millis(1200))
+                .unwrap_or_default();
+            out.push((name.clone(), classify_clear(&answers, *resp)));
+        }
+        out
+    }
+
     /// Lê um DID por UDS 0x22 e devolve os bytes de dado (após `62 <did>`).
     pub fn read_did_raw(&mut self, req: u16, resp: u16, did: u16) -> Option<Vec<u8>> {
         let _ = self.dev.add_flow_control_filter(resp, req);
@@ -252,5 +302,42 @@ mod tests {
         assert_eq!(dtc_code(0x06, 0x71, 0x00), "P0671");
         let svc = [0x59, 0x02, 0xFF, 0x5A, 0x13, 0x08, 0x2A];
         assert_eq!(decode_dtcs(&svc), vec![([0x5A, 0x13, 0x08], 0x2A)]);
+    }
+
+    fn r(can_id: u32, service: &[u8]) -> IsoTpResponse {
+        IsoTpResponse {
+            can_id,
+            service: service.to_vec(),
+        }
+    }
+
+    #[test]
+    fn clear_positive() {
+        let a = [r(0x7E8, &[0x54])];
+        assert_eq!(classify_clear(&a, 0x7E8), ClearOutcome::Cleared);
+    }
+
+    #[test]
+    fn clear_pending_then_positive() {
+        let a = [r(0x7E8, &[0x7F, 0x14, 0x78]), r(0x7E8, &[0x54])];
+        assert_eq!(classify_clear(&a, 0x7E8), ClearOutcome::Cleared);
+    }
+
+    #[test]
+    fn clear_pending_only_is_no_response() {
+        let a = [r(0x7E8, &[0x7F, 0x14, 0x78])];
+        assert_eq!(classify_clear(&a, 0x7E8), ClearOutcome::NoResponse);
+    }
+
+    #[test]
+    fn clear_refused() {
+        let a = [r(0x7E8, &[0x7F, 0x14, 0x22])];
+        assert_eq!(classify_clear(&a, 0x7E8), ClearOutcome::Refused(0x22));
+    }
+
+    #[test]
+    fn clear_ignores_other_modules() {
+        let a = [r(0x7E9, &[0x54]), r(0x7EA, &[0x7F, 0x14, 0x31])];
+        assert_eq!(classify_clear(&a, 0x7E8), ClearOutcome::NoResponse);
     }
 }

@@ -12,6 +12,8 @@
 //! - `jlr_scan(modules_json) -> {present:[[sigla,req,resp]], error?}`
 //! - `jlr_dtcs(present_json) -> {modules:[{module, dtcs:[{code,status}]}], error?}`
 //! - `jlr_read_did(req, resp, did) -> {hex?, error?}`
+//! - `jlr_clear_dtcs(modules_json) -> {modules:[{module, result, nrc?}], error?}`
+//!   (`result` = `cleared` | `refused` | `no_response`). ESCREVE no veículo.
 //! - `jlr_disconnect()`
 //! - `jlr_free(ptr)`
 
@@ -19,7 +21,7 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Mutex, OnceLock};
 
-use diag::{CarSession, ModuleAddr, ModuleDtcs, SerialTransport};
+use diag::{CarSession, ClearOutcome, ModuleAddr, ModuleDtcs, SerialTransport};
 #[cfg(target_os = "android")]
 use diag::UsbFdTransport;
 use serde_json::{json, Value};
@@ -53,6 +55,13 @@ impl AnySession {
             Self::Serial(s) => s.read_dtcs(m),
             #[cfg(target_os = "android")]
             Self::Usb(s) => s.read_dtcs(m),
+        }
+    }
+    fn clear_dtcs(&mut self, m: &[ModuleAddr]) -> Vec<(String, ClearOutcome)> {
+        match self {
+            Self::Serial(s) => s.clear_dtcs(m),
+            #[cfg(target_os = "android")]
+            Self::Usb(s) => s.clear_dtcs(m),
         }
     }
     fn read_did_raw(&mut self, req: u16, resp: u16, did: u16) -> Option<Vec<u8>> {
@@ -217,6 +226,35 @@ pub extern "C" fn jlr_dtcs(present_json: *const c_char) -> *mut c_char {
                         .map(|d| json!({ "code": d.code, "status": d.status }))
                         .collect();
                     json!({ "module": m.module, "dtcs": dtcs })
+                })
+                .collect();
+            to_c(json!({ "modules": arr }))
+        })
+    })
+}
+
+/// Apaga os DTCs (UDS 0x14) dos módulos informados (mesmo formato do scan).
+/// ESCREVE no veículo — o app só chama depois da confirmação do usuário.
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn jlr_clear_dtcs(modules_json: *const c_char) -> *mut c_char {
+    guard(|| {
+        let mods = match parse_modules(unsafe { in_str(modules_json) }) {
+            Ok(m) => m,
+            Err(e) => return err(e),
+        };
+        with_session(|s| {
+            let arr: Vec<Value> = s
+                .clear_dtcs(&mods)
+                .into_iter()
+                .map(|(module, outcome)| match outcome {
+                    ClearOutcome::Cleared => json!({ "module": module, "result": "cleared" }),
+                    ClearOutcome::Refused(nrc) => {
+                        json!({ "module": module, "result": "refused", "nrc": nrc })
+                    }
+                    ClearOutcome::NoResponse => {
+                        json!({ "module": module, "result": "no_response" })
+                    }
                 })
                 .collect();
             to_c(json!({ "modules": arr }))
