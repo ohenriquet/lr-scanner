@@ -93,7 +93,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "car-scan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "diag"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-lite",
  "mongoose",
@@ -377,7 +377,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jlr-bridge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "diag",
  "serde_json",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "jlr-security"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror",
 ]
@@ -481,14 +481,14 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mongoose"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "mongoose-bench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -654,7 +654,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sdd-crypto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cipher",
  "des",
@@ -663,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "sdd-data"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "quick-xml",
  "rusqlite",
@@ -676,7 +676,7 @@ dependencies = [
 
 [[package]]
 name = "sdd-import"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "secalg-oracle"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",

@@ -25,7 +25,7 @@ The script: builds `libjlr_bridge.dylib` (your Mac's architecture), exports the
 pack to the app, runs `flutter build macos --release`, **embeds the dylib** in
 `Contents/Frameworks/` and re-signs the app ad-hoc (so Gatekeeper lets it run).
 
-Result: `app/jlr_app/build/macos/Build/Products/Release/jlr_sdd.app`.
+Result: `app/jlr_app/build/macos/Build/Products/Release/LR Scanner.app`.
 
 ## Run
 Open the `.app`. In **Connect**, enter the Mongoose port (e.g.

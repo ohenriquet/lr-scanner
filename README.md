@@ -47,8 +47,9 @@ the environment with `source env.sh` first):
   (direct FFI to the Mongoose; requires VS Build Tools with the C++ workload).
 - **Android (APK):** `bash app/jlr_app/build-android.sh` → `app-release.apk`
   (requires Android SDK/NDK + `cargo-ndk`; USB-OTG connection is experimental —
-  see [`app/jlr_app/ANDROID.md`](app/jlr_app/ANDROID.md)).
-- **macOS:** `bash app/jlr_app/build-macos.sh` on a Mac
+  see [`app/jlr_app/ANDROID.md`](app/jlr_app/ANDROID.md)). Also runs on
+  **Android Auto** (read/clear faults, live charts; needs wireless Android Auto).
+- **macOS:** `bash app/jlr_app/build-macos.sh` on a Mac → `LR Scanner.app`
   (see [`app/jlr_app/MACOS.md`](app/jlr_app/MACOS.md)).
 - **Web + local server:** `run-app.bat` (starts `car-scan serve` and opens the browser).
 

@@ -43,8 +43,9 @@ Binários da beta em **[Releases](../../releases)**. Para compilar do código
   (FFI direto com o Mongoose; requer VS Build Tools com o workload C++).
 - **Android (APK):** `bash app/jlr_app/build-android.sh` → `app-release.apk`
   (requer Android SDK/NDK + `cargo-ndk`; conexão USB-OTG experimental —
-  ver [`app/jlr_app/ANDROID.md`](app/jlr_app/ANDROID.md)).
-- **macOS:** `bash app/jlr_app/build-macos.sh` num Mac
+  ver [`app/jlr_app/ANDROID.md`](app/jlr_app/ANDROID.md)). Também roda no
+  **Android Auto** (ler/limpar falhas, gráficos ao vivo; exige Android Auto sem fio).
+- **macOS:** `bash app/jlr_app/build-macos.sh` num Mac → `LR Scanner.app`
   (ver [`app/jlr_app/MACOS.md`](app/jlr_app/MACOS.md)).
 - **Web + servidor local:** `run-app.bat` (sobe `car-scan serve` e abre o navegador).
 
