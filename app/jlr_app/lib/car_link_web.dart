@@ -67,6 +67,10 @@ class CarLink {
     }
   }
 
+  /// Limpar DTCs não é exposto pelo servidor local da web.
+  Future<Map<String, dynamic>> clearDtcs(List<List<dynamic>> modules) async =>
+      {'error': L.t('Available only in the native app.')};
+
   Future<Map<String, String?>> readMany(List<List<int>> reqs) async {
     try {
       final r = await http.post(_u('readmany'), body: jsonEncode(reqs));

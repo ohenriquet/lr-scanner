@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Textos do app no Android (nome) e das telas do Android Auto. Inglês é o
+     padrão; values-pt e values-es trazem as traduções. -->
+<resources>
+    <string name="app_name" translatable="false">LR Scanner</string>
+
+    <string name="auto_pack_error">Vehicle pack not found. Copy assets/pack.json into the app and build it again.\n%1$s</string>
+
+    <!-- Início -->
+    <string name="tile_faults">Faults</string>
+    <string name="tile_live">Live data</string>
+    <string name="tile_clear">Clear faults</string>
+    <string name="tile_connection">Connection</string>
+    <string name="txt_connect_first">Connect first</string>
+    <string name="txt_reading_progress">Reading %1$d/%2$d…</string>
+    <string name="txt_no_faults">No faults</string>
+    <string name="txt_faults_summary">%1$d confirmed · %2$d total</string>
+    <string name="txt_live_hint">Sensor charts</string>
+    <string name="txt_clear_hint">Erase fault memory</string>
+    <string name="txt_connecting">Connecting…</string>
+    <string name="txt_connected_vin">VIN %1$s</string>
+    <string name="txt_connected">Connected</string>
+    <string name="txt_demo">Demo (sample data)</string>
+    <string name="txt_tap_to_connect">Tap to connect</string>
+    <string name="toast_connecting">Connecting… if the phone asks for USB permission, allow it</string>
+    <string name="toast_wait">Wait for the reading to finish</string>
+    <string name="toast_no_faults">No faults to clear</string>
+    <string name="action_demo">Demo</string>
+    <string name="action_reread">Reread</string>
+
+    <!-- Falhas -->
+    <string name="faults_title">Faults</string>
+    <string name="faults_empty">No faults in memory</string>
+    <string name="faults_more">+%1$d more — see them on the phone</string>
+    <string name="fault_confirmed">Confirmed · status 0x%1$s</string>
+    <string name="fault_history">History · status 0x%1$s</string>
+    <string name="fault_no_desc">No description in the pack</string>
+    <string name="fault_module">Module %1$s · %2$s</string>
+    <string name="help_causes">Probable causes</string>
+    <string name="help_actions">Recommended actions</string>
+    <string name="help_symptoms">Symptoms</string>
+    <string name="help_supp">Additional description</string>
+    <string name="action_clear_module">Clear this module</string>
+
+    <!-- Limpar -->
+    <string name="clear_title">Clear faults</string>
+    <string name="clear_confirm_all">Erase the fault memory of %1$d modules? Do it with the car stopped. A fault that is still present comes back on the next read.</string>
+    <string name="clear_confirm_module">Erase the faults of module %1$s? Do it with the car stopped. A fault that is still present comes back on the next read.</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_ok">OK</string>
+    <string name="clear_running">Clearing faults…</string>
+    <string name="clear_result">Cleared in %1$d modules · %2$d refused · %3$d no response.\n%4$d faults remain in memory.</string>
+    <string name="clear_error">Could not clear: %1$s</string>
+
+    <!-- Conexão -->
+    <string name="disconnect_confirm">Disconnect from the Mongoose?</string>
+    <string name="action_disconnect">Disconnect</string>
+
+    <!-- Ao vivo -->
+    <string name="live_title">Live data</string>
+    <string name="live_empty">No signals for this vehicle in the pack</string>
+    <string name="live_minmax">min %1$s · max %2$s</string>
+    <string name="group_suspension">Air suspension</string>
+    <string name="group_engine">Engine</string>
+    <string name="group_electrical">Battery &amp; voltage</string>
+    <string name="group_transmission">Transmission</string>
+    <string name="group_phone">Watched on the phone</string>
+    <string name="group_count">%1$d signals</string>
+    <string name="chart_now">Now</string>
+    <string name="chart_min">Minimum (60 s)</string>
+    <string name="chart_max">Maximum (60 s)</string>
+    <string name="chart_now_axis">now</string>
+</resources>

@@ -97,6 +97,14 @@ class Module {
   String get rxHex => rx == null ? '—' : '0x${rx!.toRadixString(16).toUpperCase()}';
 }
 
+/// Unidade como o usuário lê (o pacote traz `degC`, `pct`, `int`...).
+String prettyUnit(String? unit) => switch (unit) {
+      null || 'int' => '',
+      'degC' => '°C',
+      'pct' => '%',
+      _ => unit,
+    };
+
 class LiveParam {
   final String did; // "0x3B03"
   final String name;
@@ -143,14 +151,14 @@ class LiveParam {
     if (source == 'mdl') return 'valor cru';
     if (kind == 'enum') return 'enum';
     if (kind == 'linear') {
-      final u = unit ?? '';
+      final u = prettyUnit(unit);
       final m = mult ?? 1;
       final o = offset ?? 0;
       final mm = (m == 1) ? '' : '× $m ';
       final oo = (o == 0) ? '' : '(offset $o) ';
       return '$mm$oo$u'.trim();
     }
-    return unit ?? '';
+    return prettyUnit(unit);
   }
 }
 

@@ -466,7 +466,7 @@ class _FalhasScreenState extends State<FalhasScreen> {
                       fontWeight: FontWeight.w700, fontSize: 13),
                 ),
               ),
-              if (car.dtcsScanning)
+              if (car.dtcsScanning || car.clearing)
                 Padding(
                   padding: const EdgeInsets.only(right: 10),
                   child: SizedBox(
@@ -476,11 +476,22 @@ class _FalhasScreenState extends State<FalhasScreen> {
                           strokeWidth: 2, color: C.accent)),
                 ),
               TextButton.icon(
-                onPressed: (car.reading || car.dtcsScanning)
+                onPressed: (car.reading || car.dtcsScanning || car.clearing)
                     ? null
                     : () => car.refresh(),
                 icon: const Icon(Icons.refresh, size: 16),
                 label: Text(L.t('Reread')),
+              ),
+              TextButton.icon(
+                onPressed: (entries.isEmpty ||
+                        car.reading ||
+                        car.dtcsScanning ||
+                        car.clearing)
+                    ? null
+                    : () => _confirmClear(car),
+                style: TextButton.styleFrom(foregroundColor: C.crit),
+                icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                label: Text(L.t('Clear')),
               ),
             ]),
           ),
@@ -501,6 +512,42 @@ class _FalhasScreenState extends State<FalhasScreen> {
     return Center(
         child: Text(L.t('Type a code to search'),
             style: TextStyle(color: C.ink3)));
+  }
+
+  /// Confirma e apaga as falhas (UDS 0x14) de todos os módulos; mostra o resumo.
+  Future<void> _confirmClear(CarState car) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: C.panel,
+        title: Text(L.t('Clear faults?')),
+        content: Text(
+          L.clearConfirm(car.online.length),
+          style: TextStyle(color: C.ink2),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(L.t('Cancel'))),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+                backgroundColor: C.crit, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+            label: Text(L.t('Clear')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final r = await car.clearDtcs();
+    messenger.showSnackBar(SnackBar(
+      content: Text(r.error ??
+          L.clearResult(r.cleared.length, r.refused.length,
+              r.noResponse.length, r.remaining)),
+      duration: const Duration(seconds: 6),
+    ));
   }
 
   /// Tile de uma falha ativa (módulo + código + status), com o help do módulo.

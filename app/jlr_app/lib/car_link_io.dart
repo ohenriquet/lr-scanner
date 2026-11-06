@@ -63,6 +63,12 @@ class CarLink {
     return Isolate.run(() => JlrBridge.open(p).dtcs(present));
   }
 
+  /// Apaga os DTCs dos módulos informados (UDS 0x14). ESCREVE no veículo.
+  Future<Map<String, dynamic>> clearDtcs(List<List<dynamic>> modules) {
+    final p = path;
+    return Isolate.run(() => JlrBridge.open(p).clearDtcs(modules));
+  }
+
   /// Lê vários DIDs numa tacada (um isolate). `reqs` = [[req,resp,did], ...].
   /// Devolve "req:resp:did" -> hex (ou null).
   Future<Map<String, String?>> readMany(List<List<int>> reqs) {

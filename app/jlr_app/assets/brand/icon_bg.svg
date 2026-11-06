@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#1b2933"/>
+    <stop offset="0.55" stop-color="#0f171d"/>
+    <stop offset="1" stop-color="#070b0e"/>
+  </linearGradient>
+  <radialGradient id="glow">
+    <stop offset="0" stop-color="#2dd4bf" stop-opacity="0.72"/>
+    <stop offset="0.45" stop-color="#1f9e8f" stop-opacity="0.30"/>
+    <stop offset="1" stop-color="#0e3b37" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="scan" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#2dd4bf" stop-opacity="0"/>
+    <stop offset="0.5" stop-color="#b9fff5" stop-opacity="1"/>
+    <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="scanglow" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#2dd4bf" stop-opacity="0"/>
+    <stop offset="0.5" stop-color="#2dd4bf" stop-opacity="0.9"/>
+    <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="lineblur" x="-10%" y="-300%" width="120%" height="700%">
+    <feGaussianBlur stdDeviation="6"/>
+  </filter>
+</defs>
+
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<circle cx="512.0" cy="514.9" r="426.7" fill="url(#glow)"/>
+
+</svg>

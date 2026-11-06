@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'app_core.dart';
+import 'auto_bridge.dart';
 import 'car_link.dart';
 import 'car_state.dart';
 import 'pack.dart';
@@ -6,7 +9,15 @@ import 'screens.dart';
 import 'theme.dart';
 import 'l10n.dart';
 
-void main() => runApp(const JlrApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Android Auto: a mesma engine atende a tela do carro (ver auto_bridge.dart).
+  unawaited(AutoBridge.init());
+  runApp(const JlrApp());
+}
+
+/// Nome do app.
+const appName = 'LR Scanner';
 
 String _langName(AppLang l) => switch (l) {
       AppLang.en => 'English',
@@ -80,7 +91,7 @@ class _JlrAppState extends State<JlrApp> with WidgetsBindingObserver {
       outline: C.line,
     );
     return MaterialApp(
-      title: 'JLR OpenDiag',
+      title: appName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -126,8 +137,7 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  late final Future<Pack> _pack = Pack.load();
-  CarState? _car;
+  final Future<Pack> _pack = AppCore.instance.pack;
   int _tab = 0;
 
   // Deep-link opcional por URL: ?tab=0|1|2, ?q=<busca> e ?demo=1 (pré-visualização).
@@ -176,8 +186,9 @@ class _HomeShellState extends State<HomeShell> {
           );
         }
         final pack = snap.data!;
-        final car = _car ??= CarState(pack);
+        final car = AppCore.instance.carFor(pack);
         if (_demo && !car.demo && !car.connected) {
+          _demo = false; // uma vez só (desconectar não recarrega o demo)
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) car.loadDemo();
           });
@@ -233,17 +244,8 @@ class _HomeShellState extends State<HomeShell> {
           appBar: AppBar(
             backgroundColor: C.panel,
             surfaceTintColor: Colors.transparent,
-            title: Row(
-              children: [
-                Icon(Icons.monitor_heart_outlined, color: C.accent, size: 20),
-                const SizedBox(width: 8),
-                const Text('JLR OpenDiag',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                const SizedBox(width: 10),
-                Text('Discovery 4 · L319',
-                    style: TextStyle(color: C.ink2, fontSize: 12)),
-              ],
-            ),
+            titleSpacing: 12,
+            title: const _Brand(),
             actions: [
               PopupMenuButton<AppLang>(
                 tooltip: 'Language',
@@ -346,12 +348,6 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  @override
-  void dispose() {
-    _car?.dispose();
-    super.dispose();
-  }
-
   void _openConnect(BuildContext context, CarState car) {
     if (!CarLink.available) {
       showDialog(
@@ -395,7 +391,7 @@ class _HomeShellState extends State<HomeShell> {
             ),
             const SizedBox(height: 10),
             Text(
-              L.t('Reads VIN, scans the modules and reads active faults. Ignition on, engine off. Nothing is written.'),
+              L.t('Reads VIN, scans the modules and reads the faults — reading writes nothing. Clearing faults is a separate action, always confirmed. Ignition on, engine off.'),
               style: TextStyle(fontSize: 11.5, color: C.ink3),
             ),
           ],
@@ -415,6 +411,52 @@ class _HomeShellState extends State<HomeShell> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Marca do app na AppBar: ícone da D4 + "LR Scanner" + o veículo.
+class _Brand extends StatelessWidget {
+  const _Brand();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(9),
+          child: Image.asset('assets/brand/logo.png',
+              width: 34, height: 34, filterQuality: FilterQuality.medium),
+        ),
+        const SizedBox(width: 10),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                    text: 'LR',
+                    style: TextStyle(
+                        color: C.accent,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6)),
+                TextSpan(
+                    text: ' Scanner',
+                    style: TextStyle(
+                        color: C.ink,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.2)),
+              ]),
+              style: const TextStyle(fontSize: 17, height: 1.1),
+            ),
+            Text('Discovery 4 · L319',
+                style: TextStyle(
+                    color: C.ink3, fontSize: 11, letterSpacing: 0.3, height: 1.2)),
+          ],
+        ),
+      ],
     );
   }
 }

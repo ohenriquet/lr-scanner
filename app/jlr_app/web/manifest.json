@@ -1,11 +1,11 @@
 {
-    "name": "jlr_sdd",
-    "short_name": "jlr_sdd",
+    "name": "LR Scanner",
+    "short_name": "LR Scanner",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0F141A",
+    "theme_color": "#0F141A",
+    "description": "LR Scanner — diagnóstico do Land Rover Discovery 4 (L319).",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

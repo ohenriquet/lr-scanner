@@ -36,6 +36,8 @@ class JlrBridge {
   late final _scan = _lib.lookupFunction<_StrArgC, _StrArgD>('jlr_scan');
   late final _dtcs = _lib.lookupFunction<_StrArgC, _StrArgD>('jlr_dtcs');
   late final _readDid = _lib.lookupFunction<_DidC, _DidD>('jlr_read_did');
+  late final _clearDtcs =
+      _lib.lookupFunction<_StrArgC, _StrArgD>('jlr_clear_dtcs');
   late final _free = _lib.lookupFunction<_FreeC, _FreeD>('jlr_free');
 
   JlrBridge._(this._lib);
@@ -129,6 +131,18 @@ class JlrBridge {
             .toList();
       }
       return out;
+    } finally {
+      calloc.free(cp);
+    }
+  }
+
+  /// Apaga os DTCs (UDS 0x14) dos módulos `[[sigla, req, resp], ...]`.
+  /// ESCREVE no veículo. Devolve `{modules:[{module, result, nrc?}]}` ou
+  /// `{error}`; `result` = `cleared` | `refused` | `no_response`.
+  Map<String, dynamic> clearDtcs(List<List<dynamic>> modules) {
+    final cp = jsonEncode(modules).toNativeUtf8();
+    try {
+      return _call(_clearDtcs(cp));
     } finally {
       calloc.free(cp);
     }

@@ -1,7 +1,7 @@
 name: jlr_sdd
-description: "Diagnóstico JLR — app multiplataforma (porte do SDD)."
+description: "LR Scanner — diagnóstico do Land Rover Discovery 4 (porte do SDD)."
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.13.7
@@ -22,3 +22,4 @@ flutter:
   assets:
     - assets/pack.json
     - assets/car/d4.jpg
+    - assets/brand/logo.png

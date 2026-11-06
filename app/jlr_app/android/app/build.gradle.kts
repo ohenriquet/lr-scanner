@@ -29,6 +29,10 @@ android {
         versionName = flutter.versionName
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
@@ -46,4 +50,22 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Android Auto (telas em template). Ver auto/ e ANDROID.md.
+    implementation("androidx.car.app:app:1.7.0")
+
+    // Testes das telas do carro na JVM (./gradlew :app:testDebugUnitTest).
+    testImplementation("androidx.car.app:app-testing:1.7.0")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16")
+}
+
+// Os testes com recursos Android empacotam os assets já copiados pelo Flutter:
+// declara a ordem para o Gradle não reclamar de dependência implícita.
+tasks.matching { it.name.matches(Regex("package(\\w+)UnitTestForUnitTest")) }.configureEach {
+    val variant = name.removePrefix("package").removeSuffix("UnitTestForUnitTest")
+    dependsOn("copyFlutterAssets$variant")
 }

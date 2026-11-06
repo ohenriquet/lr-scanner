@@ -72,6 +72,26 @@ class L {
         AppLang.en => 'Reading faults… $done/$total modules',
       };
 
+  static String clearConfirm(int modules) => switch (lang) {
+        AppLang.es =>
+          'Se borrará la memoria de fallas de $modules módulos (UDS 0x14). Hazlo con el coche detenido. Una falla que siga presente vuelve en la próxima lectura.',
+        AppLang.pt =>
+          'Isso apaga a memória de falhas de $modules módulos (UDS 0x14). Faça com o carro parado. Uma falha que continua presente volta na próxima leitura.',
+        AppLang.en =>
+          'This erases the fault memory of $modules modules (UDS 0x14). Do it with the car stopped. A fault that is still present comes back on the next read.',
+      };
+
+  static String clearResult(
+          int cleared, int refused, int noResponse, int remaining) =>
+      switch (lang) {
+        AppLang.es =>
+          'Borradas en $cleared módulos · $refused rechazaron · $noResponse sin respuesta. Quedan $remaining fallas.',
+        AppLang.pt =>
+          'Limpas em $cleared módulos · $refused recusaram · $noResponse sem resposta. Restam $remaining falhas.',
+        AppLang.en =>
+          'Cleared in $cleared modules · $refused refused · $noResponse no response. $remaining faults remain.',
+      };
+
   static String moduleLabel(String module) => switch (lang) {
         AppLang.es => 'módulo $module',
         AppLang.pt => 'módulo $module',
@@ -103,6 +123,13 @@ class L {
   // ── tabelas de tradução (chave = inglês) ─────────────────────────────────
 
   static const Map<String, String> _pt = {
+    'Clear': 'Limpar',
+    'Clear faults?': 'Limpar as falhas?',
+    'Not connected': 'Não conectado',
+    'Busy — try again in a moment': 'Ocupado — tente de novo em instantes',
+    'No module to clear': 'Nenhum módulo para limpar',
+    'Reads VIN, scans the modules and reads the faults — reading writes nothing. Clearing faults is a separate action, always confirmed. Ignition on, engine off.':
+        'Lê o VIN, varre os módulos e lê as falhas — a leitura não grava nada. Limpar falhas é uma ação separada, sempre com confirmação. Ignição ligada, motor desligado.',
     'Panel': 'Painel',
     'Live': 'Ao vivo',
     'Faults': 'Falhas',
@@ -158,8 +185,6 @@ class L {
         'Esta é a versão web (sem acesso a hardware). A leitura do carro (VIN, falhas ativas, valores de sensor) exige o app nativo (Windows/macOS/Android), que fala com o Mongoose pela ponte FFI. Aqui você vê os dados do pacote: módulos, catálogo de live data e a referência de falhas com o help do SDD por módulo.',
     'Connect to the Mongoose': 'Conectar ao Mongoose',
     'Port (e.g. COM5, /dev/ttyACM0)': 'Porta (ex.: COM5, /dev/ttyACM0)',
-    'Reads VIN, scans the modules and reads active faults. Ignition on, engine off. Nothing is written.':
-        'Lê VIN, varre os módulos e lê as falhas ativas. Ignição ligada, motor desligado. Nada é gravado.',
     'Available only in the native app.': 'Disponível apenas no app nativo.',
     'connection failed': 'falha ao conectar',
     'Mongoose not found or USB permission denied':
@@ -169,6 +194,13 @@ class L {
   };
 
   static const Map<String, String> _es = {
+    'Clear': 'Borrar',
+    'Clear faults?': '¿Borrar las fallas?',
+    'Not connected': 'No conectado',
+    'Busy — try again in a moment': 'Ocupado — inténtalo de nuevo en un momento',
+    'No module to clear': 'Ningún módulo para borrar',
+    'Reads VIN, scans the modules and reads the faults — reading writes nothing. Clearing faults is a separate action, always confirmed. Ignition on, engine off.':
+        'Lee el VIN, escanea los módulos y lee las fallas — la lectura no escribe nada. Borrar fallas es una acción aparte, siempre con confirmación. Contacto puesto, motor apagado.',
     'Panel': 'Panel',
     'Live': 'En vivo',
     'Faults': 'Fallas',
@@ -224,8 +256,6 @@ class L {
         'Esta es la versión web (sin acceso a hardware). Leer el coche (VIN, fallas activas, valores de sensores) requiere la app nativa (Windows/macOS/Android), que habla con el Mongoose por el puente FFI. Aquí ves los datos del paquete: módulos, catálogo de datos en vivo y la referencia de fallas con la ayuda del SDD por módulo.',
     'Connect to the Mongoose': 'Conectar al Mongoose',
     'Port (e.g. COM5, /dev/ttyACM0)': 'Puerto (ej.: COM5, /dev/ttyACM0)',
-    'Reads VIN, scans the modules and reads active faults. Ignition on, engine off. Nothing is written.':
-        'Lee el VIN, escanea los módulos y lee las fallas activas. Encendido en contacto, motor apagado. No se escribe nada.',
     'Available only in the native app.': 'Disponible solo en la app nativa.',
     'connection failed': 'falló la conexión',
     'Mongoose not found or USB permission denied':

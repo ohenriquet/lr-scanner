@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auto_pack_error">No se encontró el paquete del vehículo. Copia assets/pack.json a la app y vuelve a generarla.\n%1$s</string>
+
+    <!-- Inicio -->
+    <string name="tile_faults">Fallas</string>
+    <string name="tile_live">En vivo</string>
+    <string name="tile_clear">Borrar fallas</string>
+    <string name="tile_connection">Conexión</string>
+    <string name="txt_connect_first">Conecta primero</string>
+    <string name="txt_reading_progress">Leyendo %1$d/%2$d…</string>
+    <string name="txt_no_faults">Sin fallas</string>
+    <string name="txt_faults_summary">%1$d confirmadas · %2$d en total</string>
+    <string name="txt_live_hint">Gráficos de sensores</string>
+    <string name="txt_clear_hint">Borrar la memoria de fallas</string>
+    <string name="txt_connecting">Conectando…</string>
+    <string name="txt_connected_vin">VIN %1$s</string>
+    <string name="txt_connected">Conectado</string>
+    <string name="txt_demo">Demostración (datos de ejemplo)</string>
+    <string name="txt_tap_to_connect">Toca para conectar</string>
+    <string name="toast_connecting">Conectando… si el teléfono pide permiso USB, acéptalo</string>
+    <string name="toast_wait">Espera a que termine la lectura</string>
+    <string name="toast_no_faults">No hay fallas para borrar</string>
+    <string name="action_demo">Demostración</string>
+    <string name="action_reread">Releer</string>
+
+    <!-- Fallas -->
+    <string name="faults_title">Fallas</string>
+    <string name="faults_empty">Ninguna falla en memoria</string>
+    <string name="faults_more">+%1$d — míralas todas en el teléfono</string>
+    <string name="fault_confirmed">Confirmada · estado 0x%1$s</string>
+    <string name="fault_history">Histórico · estado 0x%1$s</string>
+    <string name="fault_no_desc">Sin descripción en el paquete</string>
+    <string name="fault_module">Módulo %1$s · %2$s</string>
+    <string name="help_causes">Causas probables</string>
+    <string name="help_actions">Acciones recomendadas</string>
+    <string name="help_symptoms">Síntomas</string>
+    <string name="help_supp">Descripción complementaria</string>
+    <string name="action_clear_module">Borrar este módulo</string>
+
+    <!-- Borrar -->
+    <string name="clear_title">Borrar fallas</string>
+    <string name="clear_confirm_all">¿Borrar la memoria de fallas de %1$d módulos? Hazlo con el coche detenido. Una falla que siga presente vuelve en la próxima lectura.</string>
+    <string name="clear_confirm_module">¿Borrar las fallas del módulo %1$s? Hazlo con el coche detenido. Una falla que siga presente vuelve en la próxima lectura.</string>
+    <string name="action_clear">Borrar</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_ok">OK</string>
+    <string name="clear_running">Borrando las fallas…</string>
+    <string name="clear_result">Borradas en %1$d módulos · %2$d rechazaron · %3$d sin respuesta.\nQuedan %4$d fallas en memoria.</string>
+    <string name="clear_error">No se pudo borrar: %1$s</string>
+
+    <!-- Conexión -->
+    <string name="disconnect_confirm">¿Desconectar del Mongoose?</string>
+    <string name="action_disconnect">Desconectar</string>
+
+    <!-- En vivo -->
+    <string name="live_title">En vivo</string>
+    <string name="live_empty">Ninguna señal de este vehículo en el paquete</string>
+    <string name="live_minmax">mín %1$s · máx %2$s</string>
+    <string name="group_suspension">Suspensión neumática</string>
+    <string name="group_engine">Motor</string>
+    <string name="group_electrical">Batería y tensión</string>
+    <string name="group_transmission">Caja de cambios</string>
+    <string name="group_phone">Observadas en el teléfono</string>
+    <string name="group_count">%1$d señales</string>
+    <string name="chart_now">Ahora</string>
+    <string name="chart_min">Mínimo (60 s)</string>
+    <string name="chart_max">Máximo (60 s)</string>
+    <string name="chart_now_axis">ahora</string>
+</resources>
